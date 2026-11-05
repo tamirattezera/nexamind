@@ -1,0 +1,638 @@
+openapi: 3.1.0
+
+info:
+  title: NexaMind API
+  version: 1.0.0
+  description: |
+    Initial REST API specification for NexaMind AI Chat.
+    NexaMind provides authenticated users with conversation management
+    and AI-powered messaging through a backend-managed Gemini integration.
+
+servers:
+  - url: http://localhost:8000/api/v1
+    description: Local development server
+
+tags:
+  - name: Authentication
+    description: User registration and authentication
+  - name: Users
+    description: Authenticated user profile
+  - name: Conversations
+    description: Conversation management
+  - name: Messages
+    description: Conversation message history and AI generation
+
+security:
+  - BearerAuth: []
+
+paths:
+  /auth/register/:
+    post:
+      tags:
+        - Authentication
+      summary: Register a user
+      description: Create a new NexaMind account.
+      security: []
+      operationId: registerUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: Account created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegisterResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "409":
+          description: Account identifier conflict
+
+  /auth/login/:
+    post:
+      tags:
+        - Authentication
+      summary: Login
+      description: Authenticate a user and obtain JWT credentials.
+      security: []
+      operationId: loginUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Authentication successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          description: Invalid credentials
+
+  /auth/token/refresh/:
+    post:
+      tags:
+        - Authentication
+      summary: Refresh access token
+      security: []
+      operationId: refreshToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshTokenRequest"
+      responses:
+        "200":
+          description: Access token refreshed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccessTokenResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          description: Invalid or expired refresh token
+
+  /auth/me/:
+    get:
+      tags:
+        - Users
+      summary: Retrieve current user
+      operationId: getCurrentUser
+      responses:
+        "200":
+          description: Current authenticated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /conversations/:
+    get:
+      tags:
+        - Conversations
+      summary: List conversations
+      operationId: listConversations
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: Paginated conversation list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+    post:
+      tags:
+        - Conversations
+      summary: Create conversation
+      operationId: createConversation
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConversationCreate"
+      responses:
+        "201":
+          description: Conversation created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Conversation"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /conversations/{conversation_id}/:
+    parameters:
+      - $ref: "#/components/parameters/ConversationId"
+
+    get:
+      tags:
+        - Conversations
+      summary: Retrieve conversation
+      operationId: retrieveConversation
+      responses:
+        "200":
+          description: Conversation details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Conversation"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    patch:
+      tags:
+        - Conversations
+      summary: Update conversation
+      operationId: updateConversation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConversationUpdate"
+      responses:
+        "200":
+          description: Conversation updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Conversation"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    delete:
+      tags:
+        - Conversations
+      summary: Delete conversation
+      operationId: deleteConversation
+      responses:
+        "204":
+          description: Conversation deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /conversations/{conversation_id}/messages/:
+    parameters:
+      - $ref: "#/components/parameters/ConversationId"
+
+    get:
+      tags:
+        - Messages
+      summary: List conversation messages
+      operationId: listMessages
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: Paginated chronological message history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    post:
+      tags:
+        - Messages
+      summary: Send message and generate AI response
+      description: |
+        Submit user content to a conversation.
+        The backend validates ownership, constructs conversation context,
+        calls the configured Gemini provider, and returns persisted messages.
+        The client cannot choose the stored message role or provider credentials.
+      operationId: sendMessage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendMessageRequest"
+      responses:
+        "201":
+          description: User and assistant messages created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SendMessageResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          description: Application or provider rate limit reached
+        "502":
+          description: AI provider failure
+        "504":
+          description: AI provider timeout
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT access token.
+
+  parameters:
+    ConversationId:
+      name: conversation_id
+      in: path
+      required: true
+      description: UUID of the conversation.
+      schema:
+        type: string
+        format: uuid
+
+    Page:
+      name: page
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+
+    PageSize:
+      name: page_size
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+
+  schemas:
+    RegisterRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - username
+        - email
+        - password
+        - password_confirm
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 150
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+          minLength: 8
+        password_confirm:
+          type: string
+          format: password
+
+    RegisterResponse:
+      type: object
+      required:
+        - user
+        - message
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+        message:
+          type: string
+
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+          format: password
+
+    TokenResponse:
+      type: object
+      required:
+        - access
+        - refresh
+      properties:
+        access:
+          type: string
+        refresh:
+          type: string
+
+    RefreshTokenRequest:
+      type: object
+      required:
+        - refresh
+      properties:
+        refresh:
+          type: string
+
+    AccessTokenResponse:
+      type: object
+      required:
+        - access
+      properties:
+        access:
+          type: string
+
+    User:
+      type: object
+      required:
+        - id
+        - username
+        - email
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        email:
+          type: string
+          format: email
+
+    ConversationCreate:
+      type: object
+      additionalProperties: false
+      properties:
+        title:
+          type: string
+          maxLength: 200
+        custom_instructions:
+          type: string
+
+    ConversationUpdate:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        title:
+          type: string
+          maxLength: 200
+        custom_instructions:
+          type: string
+
+    Conversation:
+      type: object
+      required:
+        - id
+        - title
+        - custom_instructions
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        custom_instructions:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ConversationSummary:
+      type: object
+      required:
+        - id
+        - title
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Message:
+      type: object
+      required:
+        - id
+        - role
+        - content
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum:
+            - user
+            - assistant
+        content:
+          type: string
+        model:
+          type:
+            - string
+            - "null"
+        usage:
+          oneOf:
+            - $ref: "#/components/schemas/Usage"
+            - type: "null"
+        created_at:
+          type: string
+          format: date-time
+
+    Usage:
+      type: object
+      properties:
+        input_tokens:
+          type:
+            - integer
+            - "null"
+        output_tokens:
+          type:
+            - integer
+            - "null"
+        total_tokens:
+          type:
+            - integer
+            - "null"
+
+    SendMessageRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - content
+      properties:
+        content:
+          type: string
+          minLength: 1
+          description: User message content. Whitespace-only values are rejected by backend validation.
+
+    SendMessageResponse:
+      type: object
+      required:
+        - user_message
+        - assistant_message
+      properties:
+        user_message:
+          $ref: "#/components/schemas/Message"
+        assistant_message:
+          $ref: "#/components/schemas/Message"
+
+    ConversationList:
+      type: object
+      required:
+        - count
+        - results
+      properties:
+        count:
+          type: integer
+        next:
+          type:
+            - string
+            - "null"
+          format: uri
+        previous:
+          type:
+            - string
+            - "null"
+          format: uri
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConversationSummary"
+
+    MessageList:
+      type: object
+      required:
+        - count
+        - results
+      properties:
+        count:
+          type: integer
+        next:
+          type:
+            - string
+            - "null"
+          format: uri
+        previous:
+          type:
+            - string
+            - "null"
+          format: uri
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/Message"
+
+    Error:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: object
+              additionalProperties: true
+
+  responses:
+    ValidationError:
+      description: Request validation failed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+    Unauthorized:
+      description: Authentication is required or the credential is invalid
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+    NotFound:
+      description: Resource does not exist or is not accessible
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+    InternalError:
+      description: Unexpected internal server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
