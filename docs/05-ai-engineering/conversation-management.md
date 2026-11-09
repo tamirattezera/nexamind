@@ -1,5 +1,25 @@
 # Conversation Management
 
+**Project:** NexaMind
+**Document:** Conversation Management
+**Status:** Draft
+**Version:** 1.0
+**Last Updated:** November 2026
+
+## Related Documents
+
+- [AI Architecture](https://github.com/tamirattezera/nexamind/blob/main/docs/02-system-design/ai-architecture.md)
+- [Backend Architecture](https://github.com/tamirattezera/nexamind/blob/main/docs/02-system-design/backend-architecture.md)
+- [Database Design](https://github.com/tamirattezera/nexamind/blob/main/docs/02-system-design/database-design.md)
+- [Security Architecture](https://github.com/tamirattezera/nexamind/blob/main/docs/02-system-design/security-architecture.md)
+- [API Overview](https://github.com/tamirattezera/nexamind/blob/main/docs/03-api/api-overview.md)
+- [OpenAPI Specification](https://github.com/tamirattezera/nexamind/blob/main/docs/03-api/openapi.yaml)
+- [Acceptance Criteria](https://github.com/tamirattezera/nexamind/blob/main/docs/01-requirements/acceptance-criteria.md)
+- [Testing Strategy](https://github.com/tamirattezera/nexamind/blob/main/docs/04-engineering/testing-strategy.md)
+- [Gemini Integration](https://github.com/tamirattezera/nexamind/blob/main/docs/05-ai-engineering/gemini-integration.md)
+- [Token and Cost Management](https://github.com/tamirattezera/nexamind/blob/main/docs/05-ai-engineering/token-and-cost-management.md)
+- [AI Safety and Security](https://github.com/tamirattezera/nexamind/blob/main/docs/05-ai-engineering/ai-safety-and-security.md)
+
 ## 1. Purpose
 
 This document defines how NexaMind creates, stores, retrieves, organizes, and manages AI conversations.

@@ -257,6 +257,6 @@ The project will not move to the next phase until the current phase's required d
 
 ---
 
-**Document Owner:** NexaMind Project
+**Document Owner:** Tamirat Tezera
 **Document Version:** 1.0
 **Status:** Draft

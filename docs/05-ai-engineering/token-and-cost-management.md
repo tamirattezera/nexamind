@@ -1,5 +1,23 @@
 # Token and Cost Management
 
+**Project:** NexaMind
+**Document:** Token and Cost Management
+**Status:** Draft
+**Version:** 1.0
+**Last Updated:** November 2026
+
+## Related Documents
+
+- [AI Architecture](https://github.com/tamirattezera/nexamind/blob/main/docs/02-system-design/ai-architecture.md)
+- [Backend Architecture](https://github.com/tamirattezera/nexamind/blob/main/docs/02-system-design/backend-architecture.md)
+- [Database Design](https://github.com/tamirattezera/nexamind/blob/main/docs/02-system-design/database-design.md)
+- [Gemini Integration](https://github.com/tamirattezera/nexamind/blob/main/docs/05-ai-engineering/gemini-integration.md)
+- [Conversation Management](https://github.com/tamirattezera/nexamind/blob/main/docs/05-ai-engineering/conversation-management.md)
+- [AI Safety and Security](https://github.com/tamirattezera/nexamind/blob/main/docs/05-ai-engineering/ai-safety-and-security.md)
+- [Testing Strategy](https://github.com/tamirattezera/nexamind/blob/main/docs/04-engineering/testing-strategy.md)
+- [Environment Configuration](https://github.com/tamirattezera/nexamind/blob/main/docs/06-deployment/environment-configuration.md)
+- [Monitoring and Logging](https://github.com/tamirattezera/nexamind/blob/main/docs/06-deployment/monitoring-and-logging.md)
+
 ## 1. Purpose
 
 This document defines how NexaMind measures, monitors, estimates, and manages AI token consumption and API costs.

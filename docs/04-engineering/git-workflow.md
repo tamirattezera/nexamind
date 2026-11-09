@@ -438,6 +438,16 @@ Before finishing a development session:
 
 ---
 
+## 11. Related Documents
+
+- [Development Setup](https://github.com/tamirattezera/nexamind/blob/main/docs/04-engineering/development-setup.md)
+- [Coding Standards](https://github.com/tamirattezera/nexamind/blob/main/docs/04-engineering/coding-standards.md)
+- [Testing Strategy](https://github.com/tamirattezera/nexamind/blob/main/docs/04-engineering/testing-strategy.md)
+- [Dependency Management](https://github.com/tamirattezera/nexamind/blob/main/docs/04-engineering/dependency-management.md)
+- [Project Roadmap](https://github.com/tamirattezera/nexamind/blob/main/docs/07-project-management/roadmap.md)
+- [Milestones](https://github.com/tamirattezera/nexamind/blob/main/docs/07-project-management/milestones.md)
+- [Root README](https://github.com/tamirattezera/nexamind/blob/main/README.md)
+
 ## 12. Final Principle
 
 Git is not simply a backup tool. It is an engineering record.

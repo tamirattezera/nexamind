@@ -6,6 +6,21 @@
 **Version:** 1.0
 **Last Updated:** November 2026
 
+## Related Documents
+
+- [Security Architecture](https://github.com/tamirattezera/nexamind/blob/main/docs/02-system-design/security-architecture.md)
+- [AI Architecture](https://github.com/tamirattezera/nexamind/blob/main/docs/02-system-design/ai-architecture.md)
+- [Backend Architecture](https://github.com/tamirattezera/nexamind/blob/main/docs/02-system-design/backend-architecture.md)
+- [Database Design](https://github.com/tamirattezera/nexamind/blob/main/docs/02-system-design/database-design.md)
+- [API Overview](https://github.com/tamirattezera/nexamind/blob/main/docs/03-api/api-overview.md)
+- [OpenAPI Specification](https://github.com/tamirattezera/nexamind/blob/main/docs/03-api/openapi.yaml)
+- [Testing Strategy](https://github.com/tamirattezera/nexamind/blob/main/docs/04-engineering/testing-strategy.md)
+- [Gemini Integration](https://github.com/tamirattezera/nexamind/blob/main/docs/05-ai-engineering/gemini-integration.md)
+- [Conversation Management](https://github.com/tamirattezera/nexamind/blob/main/docs/05-ai-engineering/conversation-management.md)
+- [Token and Cost Management](https://github.com/tamirattezera/nexamind/blob/main/docs/05-ai-engineering/token-and-cost-management.md)
+- [Environment Configuration](https://github.com/tamirattezera/nexamind/blob/main/docs/06-deployment/environment-configuration.md)
+- [Monitoring and Logging](https://github.com/tamirattezera/nexamind/blob/main/docs/06-deployment/monitoring-and-logging.md)
+
 ---
 
 ## 1. Purpose

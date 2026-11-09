@@ -1,5 +1,26 @@
 # Gemini Integration
 
+**Project:** NexaMind
+**Document:** Gemini Integration
+**Status:** Draft
+**Version:** 1.0
+**Last Updated:** November 2026
+
+## Related Documents
+
+- [AI Architecture](https://github.com/tamirattezera/nexamind/blob/main/docs/02-system-design/ai-architecture.md)
+- [Backend Architecture](https://github.com/tamirattezera/nexamind/blob/main/docs/02-system-design/backend-architecture.md)
+- [Security Architecture](https://github.com/tamirattezera/nexamind/blob/main/docs/02-system-design/security-architecture.md)
+- [Database Design](https://github.com/tamirattezera/nexamind/blob/main/docs/02-system-design/database-design.md)
+- [API Overview](https://github.com/tamirattezera/nexamind/blob/main/docs/03-api/api-overview.md)
+- [OpenAPI Specification](https://github.com/tamirattezera/nexamind/blob/main/docs/03-api/openapi.yaml)
+- [Testing Strategy](https://github.com/tamirattezera/nexamind/blob/main/docs/04-engineering/testing-strategy.md)
+- [Dependency Management](https://github.com/tamirattezera/nexamind/blob/main/docs/04-engineering/dependency-management.md)
+- [Conversation Management](https://github.com/tamirattezera/nexamind/blob/main/docs/05-ai-engineering/conversation-management.md)
+- [Token and Cost Management](https://github.com/tamirattezera/nexamind/blob/main/docs/05-ai-engineering/token-and-cost-management.md)
+- [AI Safety and Security](https://github.com/tamirattezera/nexamind/blob/main/docs/05-ai-engineering/ai-safety-and-security.md)
+- [Environment Configuration](https://github.com/tamirattezera/nexamind/blob/main/docs/06-deployment/environment-configuration.md)
+
 ## 1. Purpose
 
 This document defines the architecture and engineering approach for integrating Google's Gemini API into NexaMind.

@@ -1,5 +1,22 @@
 # Testing Strategy
 
+## Related Documents
+
+- [Development Setup](https://github.com/tamirattezera/nexamind/blob/main/docs/04-engineering/development-setup.md)
+- [Coding Standards](https://github.com/tamirattezera/nexamind/blob/main/docs/04-engineering/coding-standards.md)
+- [Git Workflow](https://github.com/tamirattezera/nexamind/blob/main/docs/04-engineering/git-workflow.md)
+- [Dependency Management](https://github.com/tamirattezera/nexamind/blob/main/docs/04-engineering/dependency-management.md)
+- [Functional Requirements](https://github.com/tamirattezera/nexamind/blob/main/docs/01-requirements/functional-requirements.md)
+- [Acceptance Criteria](https://github.com/tamirattezera/nexamind/blob/main/docs/01-requirements/acceptance-criteria.md)
+- [Backend Architecture](https://github.com/tamirattezera/nexamind/blob/main/docs/02-system-design/backend-architecture.md)
+- [Frontend Architecture](https://github.com/tamirattezera/nexamind/blob/main/docs/02-system-design/frontend-architecture.md)
+- [Database Design](https://github.com/tamirattezera/nexamind/blob/main/docs/02-system-design/database-design.md)
+- [Security Architecture](https://github.com/tamirattezera/nexamind/blob/main/docs/02-system-design/security-architecture.md)
+- [API Overview](https://github.com/tamirattezera/nexamind/blob/main/docs/03-api/api-overview.md)
+- [OpenAPI Specification](https://github.com/tamirattezera/nexamind/blob/main/docs/03-api/openapi.yaml)
+- [Gemini Integration](https://github.com/tamirattezera/nexamind/blob/main/docs/05-ai-engineering/gemini-integration.md)
+- [Deployment Guide](https://github.com/tamirattezera/nexamind/blob/main/docs/06-deployment/deployment-guide.md)
+
 ## 1. Purpose
 
 This document defines the testing approach for NexaMind.
