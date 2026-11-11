@@ -7,9 +7,11 @@
 __pycache__/
 *.py[cod]
 .venv/
+.venv-openssl3/
 venv/
 .pytest_cache/
 .mypy_cache/
+*.sqlite3
 
 # Node.js
 node_modules/
