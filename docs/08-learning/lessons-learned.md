@@ -196,6 +196,50 @@ Fields such as `is_staff` and `is_superuser` must be controlled by trusted backe
 
 **Lesson:** Use explicit serializer fields and validate client input. Never allow ordinary registration requests to grant administrative privileges.
 
+
+### 5.4 Serializers Are an Input Validation Boundary
+
+Django REST Framework serializers validate and transform incoming client data before application logic creates or updates database records.
+
+During NexaMind registration, the `RegistrationSerializer` validates email addresses, password confirmation, and password strength before creating a user.
+
+**Lesson:**
+
+- Treat all client input as untrusted.
+- Define explicit serializer fields.
+- Validate input before creating database records.
+- Keep password and other sensitive input fields write-only.
+- Delegate account creation to the appropriate application-level logic.
+
+A serializer is not merely a mechanism for converting Python objects into JSON. It is also an important API input-validation boundary.
+
+### 5.5 Application Validation and Database Constraints Serve Different Purposes
+
+NexaMind registration checks whether an email address already exists before creating a user.
+
+The database also enforces email uniqueness through the user model's unique constraint.
+
+These mechanisms serve different purposes:
+
+- Application-level validation provides clear and useful API error messages.
+- Database constraints preserve data integrity, including when concurrent requests attempt to create conflicting records.
+
+**Lesson:** Do not rely exclusively on application-level duplicate checks when the database can enforce the underlying integrity rule.
+
+### 5.6 Password Validation Should Reuse Established Framework Mechanisms
+
+NexaMind registration uses Django's configured password validators rather than implementing a separate password-strength system.
+
+The registration serializer calls `validate_password()` and supplies the prospective user context for password similarity checks.
+
+**Lesson:**
+
+- Reuse established framework security mechanisms.
+- Keep password validation consistent with project settings.
+- Test weak and commonly used passwords.
+- Hash passwords through Django's user manager.
+- Never return raw passwords in API responses.
+
 ---
 
 ## 6. Engineering Workflow and Documentation

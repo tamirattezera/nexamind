@@ -499,3 +499,242 @@ Continue incrementally, verifying each implementation milestone before proceedin
 **Activity:** PostgreSQL integration and authentication foundation
 **Project:** NexaMind
 **Status:** PostgreSQL-backed accounts foundation implemented; seven tests passing; Git milestone review pending
+
+---
+
+## 2026-11-12 — User Registration API Implementation
+
+### 1. Context
+
+Following the successful PostgreSQL integration and implementation of the custom email-based user model, NexaMind backend development progressed to the first authentication API endpoint.
+
+The objective was to allow new users to create accounts through a REST API while preserving the security and validation responsibilities of the backend.
+
+Django REST Framework was introduced as the API layer for this implementation.
+
+### 2. Objectives
+
+- Integrate Django REST Framework into the backend.
+- Design and implement the registration serializer.
+- Implement the registration API endpoint.
+- Validate email addresses and password confirmation.
+- Enforce Django password validation rules.
+- Ensure passwords are securely hashed.
+- Prevent clients from assigning privileged account fields.
+- Implement automated serializer and API tests.
+- Verify the implementation before committing and pushing it.
+
+### 3. Django REST Framework Integration
+
+Django REST Framework was installed and added to the backend dependency file.
+
+Dependency added:
+
+`djangorestframework==3.18.3`
+
+The `rest_framework` application was registered in Django's `INSTALLED_APPS`.
+
+The existing Django configuration and custom user model were preserved.
+
+### 4. Registration API Implementation
+
+The registration functionality was implemented inside the existing accounts application.
+
+The following files were created or updated:
+
+| File | Responsibility |
+| ---- | -------------- |
+| `apps/accounts/serializers.py` | Registration input validation, password handling, and user creation |
+| `apps/accounts/views.py` | Registration API view |
+| `apps/accounts/urls.py` | Accounts API URL configuration |
+| `config/urls.py` | Project-level API URL integration |
+| `config/settings.py` | Django REST Framework application registration |
+| `requirements/base.txt` | Backend dependency declaration |
+| `apps/accounts/tests.py` | Account manager, serializer, and API test coverage |
+
+#### Registration Endpoint
+
+The implemented endpoint is:
+
+`POST /api/v1/auth/register/`
+
+The registration request accepts:
+
+- `email`
+- `password`
+- `password_confirm`
+
+A successful registration returns HTTP `201 Created` and exposes the new user's identifier and email address.
+
+Password fields are write-only and are not included in the successful response.
+
+### 5. Validation and Security Decisions
+
+The registration serializer implements the following behaviors:
+
+- Email whitespace is removed and email addresses are normalized to lowercase.
+- Duplicate email addresses are rejected.
+- Password confirmation is required.
+- Password and confirmation values must match.
+- Django's configured password validators are applied.
+- Passwords are passed to the custom user manager for secure hashing.
+- Password confirmation is removed before user creation.
+- Client-supplied privileged fields are not accepted as writable serializer fields.
+
+The registration view explicitly uses `AllowAny` so unauthenticated users can access the registration endpoint.
+
+The database's unique email constraint remains an important final safeguard against duplicate records.
+
+### 6. Automated Testing
+
+The existing account manager tests were preserved.
+
+Additional serializer and API tests were implemented.
+
+The complete test suite covers:
+
+#### User Manager Tests
+
+1. Successful user creation.
+2. Email normalization.
+3. Missing email rejection.
+4. Missing password rejection.
+5. Successful superuser creation.
+6. Superuser staff-flag validation.
+7. Superuser privilege-flag validation.
+
+#### Registration Serializer Tests
+
+1. Successful registration.
+2. Password confirmation mismatch.
+3. Common password rejection.
+4. Duplicate email rejection.
+5. Prevention of client-assigned privileged fields.
+6. Duplicate email rejection regardless of letter casing.
+
+#### Registration API Tests
+
+1. Successful registration and HTTP 201 response.
+2. Password mismatch rejection.
+3. Weak password rejection.
+4. Duplicate email rejection.
+5. Email normalization.
+6. Privilege-escalation prevention.
+
+### 7. Verification Results
+
+The complete accounts test suite was executed successfully.
+
+| Verification | Result |
+| ------------ | ------ |
+| Tests discovered | 19 |
+| Tests passed | 19 |
+| Tests failed | 0 |
+| Tests with errors | 0 |
+| Django system check | Passed |
+| Python dependency check | Passed |
+| Git whitespace check | Passed |
+
+Test output:
+
+`Ran 19 tests`
+
+`OK`
+
+Additional verification:
+
+- `python -m pip check` reported no broken requirements.
+- `python manage.py check` reported no system-check issues.
+- `git diff --check` produced no whitespace errors.
+- The staged changes were reviewed before committing.
+
+### 8. Git Review and Delivery
+
+The implementation was staged selectively.
+
+Seven application and configuration files were included in the commit.
+
+Two untracked architecture diagrams were deliberately excluded:
+
+- `docs/02-system-design/diagrams/high-level-architecture.png`
+- `docs/02-system-design/diagrams/system_context_Diagram.png`
+
+The implementation was committed with:
+
+Commit:
+
+`294c1e4`
+
+Commit message:
+
+`feat: add user registration API`
+
+Commit summary:
+
+- 7 files changed.
+- 302 insertions.
+- 4 deletions.
+
+The commit was successfully pushed to:
+
+`origin/main`
+
+GitHub confirmed the remote branch update from `e072394` to `294c1e4`.
+
+### 9. Engineering Lessons and Observations
+
+- API serializers are responsible for translating and validating client input before application data is created.
+- Authentication and authorization decisions must remain under backend control.
+- Passwords must never be returned in registration responses.
+- Password hashing should be delegated to Django's established authentication mechanisms.
+- Serializer field configuration helps prevent mass-assignment and privilege-escalation vulnerabilities.
+- Explicit permission classes make endpoint access requirements easier to understand.
+- Tests should verify both successful behavior and rejected input.
+- Reviewing staged changes helps prevent unrelated files from entering a commit.
+- A successful test suite provides evidence for the tested behaviors, not proof of complete application security.
+
+### 10. Current Project Status
+
+The following NexaMind accounts functionality is now implemented:
+
+- Custom email-based user model.
+- Custom user manager.
+- PostgreSQL-backed account persistence.
+- Registration serializer.
+- Registration API view.
+- Registration URL routing.
+- Password and email validation.
+- Password hashing.
+- Protection against client-assigned privileged fields.
+- Automated manager, serializer, and API tests.
+
+The registration milestone is committed and pushed to GitHub.
+
+The accounts layer now supports user creation through the REST API.
+
+However, the authentication system is not yet complete. Login, token issuance, token refresh, authenticated endpoint protection, and authorization testing remain future implementation work.
+
+### 11. Resumption Point
+
+Continue NexaMind development from the committed registration API milestone.
+
+Recommended next actions:
+
+1. Review the existing authentication architecture and security requirements.
+2. Inspect the current backend dependency and configuration state.
+3. Decide and document the JWT authentication implementation.
+4. Implement the login API incrementally.
+5. Add automated tests for successful and unsuccessful authentication.
+6. Verify token issuance and authentication behavior before proceeding.
+
+Do not recreate the custom user model, PostgreSQL integration, registration serializer, or registration endpoint.
+
+Continue using the incremental implementation and verification workflow.
+
+---
+
+**Entry date:** 2026-11-12
+**Activity:** User registration API implementation
+**Project:** NexaMind
+**Commit:** `294c1e4`
+**Status:** Registration API implemented, 19 tests passing, committed and pushed to GitHub
