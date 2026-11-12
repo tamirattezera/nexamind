@@ -1,5 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from rest_framework.test import APITestCase
+from .serializers import RegistrationSerializer
 
 User = get_user_model()
 
@@ -60,3 +62,223 @@ class UserManagerTests(TestCase):
                 password="AdminPassword123!",
                 is_superuser=False,
             )
+
+
+class RegistrationSerializerTests(TestCase):
+    """Tests for user registration serializer."""
+
+    def test_register_user(self):
+        data = {
+            "email": "newuser@example.com",
+            "password": "StrongPassword123!",
+            "password_confirm": "StrongPassword123!",
+        }
+
+        serializer = RegistrationSerializer(data=data)
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+        user = serializer.save()
+
+        self.assertEqual(user.email, "newuser@example.com")
+        self.assertTrue(user.check_password("StrongPassword123!"))
+        self.assertFalse(user.is_staff)
+        self.assertFalse(user.is_superuser)
+
+    def test_password_confirmation_mismatch(self):
+        data = {
+            "email": "newuser@example.com",
+            "password": "StrongPassword123!",
+            "password_confirm": "DifferentPassword123!",
+        }
+
+        serializer = RegistrationSerializer(data=data)
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("password_confirm", serializer.errors)
+
+    def test_rejects_common_password(self):
+        data = {
+            "email": "newuser@example.com",
+            "password": "password",
+            "password_confirm": "password",
+        }
+
+        serializer = RegistrationSerializer(data=data)
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("password", serializer.errors)
+
+    def test_rejects_duplicate_email(self):
+        User.objects.create_user(
+            email="existing@example.com",
+            password="ExistingPassword123!",
+        )
+
+        data = {
+            "email": "existing@example.com",
+            "password": "StrongPassword123!",
+            "password_confirm": "StrongPassword123!",
+        }
+
+        serializer = RegistrationSerializer(data=data)
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("email", serializer.errors)
+
+    def test_client_cannot_assign_privileged_fields(self):
+        data = {
+            "email": "attacker@example.com",
+            "password": "StrongPassword123!",
+            "password_confirm": "StrongPassword123!",
+            "is_staff": True,
+            "is_superuser": True,
+        }
+
+        serializer = RegistrationSerializer(data=data)
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+        user = serializer.save()
+
+        self.assertFalse(user.is_staff)
+        self.assertFalse(user.is_superuser)
+
+    def test_rejects_duplicate_email_with_different_case(self):
+        User.objects.create_user(
+            email="existing@example.com",
+            password="ExistingPassword123!",
+        )
+
+        data = {
+            "email": "EXISTING@EXAMPLE.COM",
+            "password": "StrongPassword123!",
+            "password_confirm": "StrongPassword123!",
+        }
+
+        serializer = RegistrationSerializer(data=data)
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("email", serializer.errors)
+
+
+class RegistrationAPITests(APITestCase):
+    """Tests for the user registration API endpoint."""
+
+    def test_register_user_returns_created_response(self):
+        data = {
+            "email": "apiuser@example.com",
+            "password": "StrongPassword123!",
+            "password_confirm": "StrongPassword123!",
+        }
+
+        response = self.client.post(
+            "/api/v1/auth/register/",
+            data,
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertIn("id", response.data)
+        self.assertEqual(response.data["email"], "apiuser@example.com")
+        self.assertNotIn("password", response.data)
+        self.assertNotIn("password_confirm", response.data)
+        self.assertEqual(User.objects.count(), 1)
+        user = User.objects.get(email="apiuser@example.com")
+
+        self.assertTrue(user.check_password("StrongPassword123!"))
+        self.assertNotEqual(user.password, "StrongPassword123!")
+
+    def test_registration_rejects_password_mismatch(self):
+        data = {
+            "email": "mismatch@example.com",
+            "password": "StrongPassword123!",
+            "password_confirm": "DifferentPassword123!",
+        }
+
+        response = self.client.post(
+            "/api/v1/auth/register/",
+            data,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("password_confirm", response.data)
+        self.assertEqual(User.objects.count(), 0)
+
+    def test_registration_rejects_weak_password(self):
+        data = {
+            "email": "weak@example.com",
+            "password": "password",
+            "password_confirm": "password",
+        }
+
+        response = self.client.post(
+            "/api/v1/auth/register/",
+            data,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("password", response.data)
+        self.assertEqual(User.objects.count(), 0)
+
+    def test_registration_rejects_duplicate_email(self):
+        User.objects.create_user(
+            email="existing@example.com",
+            password="ExistingPassword123!",
+        )
+
+        data = {
+            "email": "existing@example.com",
+            "password": "StrongPassword123!",
+            "password_confirm": "StrongPassword123!",
+        }
+
+        response = self.client.post(
+            "/api/v1/auth/register/",
+            data,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("email", response.data)
+        self.assertEqual(User.objects.count(), 1)
+
+    def test_registration_normalizes_email(self):
+        data = {
+            "email": "  NEWUSER@EXAMPLE.COM  ",
+            "password": "StrongPassword123!",
+            "password_confirm": "StrongPassword123!",
+        }
+
+        response = self.client.post(
+            "/api/v1/auth/register/",
+            data,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["email"], "newuser@example.com")
+        self.assertTrue(User.objects.filter(email="newuser@example.com").exists())
+
+    def test_registration_rejects_privilege_escalation(self):
+        data = {
+            "email": "attacker@example.com",
+            "password": "StrongPassword123!",
+            "password_confirm": "StrongPassword123!",
+            "is_staff": True,
+            "is_superuser": True,
+        }
+
+        response = self.client.post(
+            "/api/v1/auth/register/",
+            data,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+        user = User.objects.get(email="attacker@example.com")
+
+        self.assertFalse(user.is_staff)
+        self.assertFalse(user.is_superuser)
