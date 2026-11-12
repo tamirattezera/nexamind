@@ -282,3 +282,151 @@ class RegistrationAPITests(APITestCase):
 
         self.assertFalse(user.is_staff)
         self.assertFalse(user.is_superuser)
+
+
+class JWTAuthenticationAPITests(APITestCase):
+    """Tests for JWT authentication endpoints."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="login@example.com",
+            password="StrongPassword123!",
+        )
+
+    def test_login_returns_access_and_refresh_tokens(self):
+        response = self.client.post(
+            "/api/v1/auth/login/",
+            {
+                "email": "login@example.com",
+                "password": "StrongPassword123!",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("access", response.data)
+        self.assertIn("refresh", response.data)
+
+    def test_login_rejects_invalid_password(self):
+        response = self.client.post(
+            "/api/v1/auth/login/",
+            {
+                "email": "login@example.com",
+                "password": "WrongPassword123!",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_login_rejects_unknown_email(self):
+        response = self.client.post(
+            "/api/v1/auth/login/",
+            {
+                "email": "unknown@example.com",
+                "password": "StrongPassword123!",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_refresh_token_returns_new_access_token(self):
+        login_response = self.client.post(
+            "/api/v1/auth/login/",
+            {
+                "email": "login@example.com",
+                "password": "StrongPassword123!",
+            },
+            format="json",
+        )
+
+        refresh_token = login_response.data["refresh"]
+
+        response = self.client.post(
+            "/api/v1/auth/token/refresh/",
+            {"refresh": refresh_token},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("access", response.data)
+
+    def test_refresh_rotates_refresh_token(self):
+        login_response = self.client.post(
+            "/api/v1/auth/login/",
+            {
+                "email": "login@example.com",
+                "password": "StrongPassword123!",
+            },
+            format="json",
+        )
+
+        original_refresh = login_response.data["refresh"]
+
+        response = self.client.post(
+            "/api/v1/auth/token/refresh/",
+            {"refresh": original_refresh},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("refresh", response.data)
+        self.assertNotEqual(response.data["refresh"], original_refresh)
+
+    def test_rotated_refresh_token_cannot_be_reused(self):
+        login_response = self.client.post(
+            "/api/v1/auth/login/",
+            {
+                "email": "login@example.com",
+                "password": "StrongPassword123!",
+            },
+            format="json",
+        )
+
+        original_refresh = login_response.data["refresh"]
+
+        first_refresh_response = self.client.post(
+            "/api/v1/auth/token/refresh/",
+            {"refresh": original_refresh},
+            format="json",
+        )
+
+        self.assertEqual(first_refresh_response.status_code, 200)
+
+        response = self.client.post(
+            "/api/v1/auth/token/refresh/",
+            {"refresh": original_refresh},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_verify_valid_access_token(self):
+        login_response = self.client.post(
+            "/api/v1/auth/login/",
+            {
+                "email": "login@example.com",
+                "password": "StrongPassword123!",
+            },
+            format="json",
+        )
+
+        access_token = login_response.data["access"]
+
+        response = self.client.post(
+            "/api/v1/auth/token/verify/",
+            {"token": access_token},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_verify_invalid_access_token(self):
+        response = self.client.post(
+            "/api/v1/auth/token/verify/",
+            {"token": "invalid.token.value"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 401)
