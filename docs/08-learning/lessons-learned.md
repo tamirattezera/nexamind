@@ -38,6 +38,35 @@ Application secrets and environment-specific configuration should not be committ
 - Add `.env` to `.gitignore`.
 - Never expose database credentials, Django secret keys, or AI provider API keys in frontend code or Git history.
 
+### 1.4 Understand How Application Configuration Is Loaded
+
+Application configuration can be stored outside source code and loaded when the application initializes.
+
+NexaMind uses `django-environ` to read environment variables from the root `.env` file and make them available to Django settings.
+
+The configuration flow is:
+
+1. The `.env` file stores environment-specific values, such as database name, username, password, host, and port.
+2. `django-environ` reads those values into the process environment.
+3. Django's `settings.py` retrieves the values through calls such as `env("DB_NAME")`.
+4. Django uses the resulting configuration to establish its database connection.
+
+**Lesson:** Understand the responsibility of each component:
+
+- `.env`: stores environment-specific configuration values.
+- `django-environ`: reads and converts configuration values.
+- `settings.py`: uses those values to configure Django.
+- `psycopg`: provides communication between Django and PostgreSQL.
+- PostgreSQL: manages and stores application data.
+
+Changing a value in `.env` does not require changing `settings.py` when the setting already reads that value dynamically.
+
+However, editing `.env` does not automatically update the configuration of an already-running Django process. The process must reload its configuration, typically through a restart.
+
+Also, environment variables already present in the process may take precedence over values loaded from `.env`, depending on the configuration.
+
+**Practical principle:** Keep configuration values outside application logic, understand when they are loaded, and verify the effective configuration without exposing secrets.
+
 ---
 
 ## 2. Django Backend Architecture
