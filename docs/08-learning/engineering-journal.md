@@ -542,15 +542,15 @@ The registration functionality was implemented inside the existing accounts appl
 
 The following files were created or updated:
 
-| File | Responsibility |
-| ---- | -------------- |
+| File                           | Responsibility                                                      |
+| ------------------------------ | ------------------------------------------------------------------- |
 | `apps/accounts/serializers.py` | Registration input validation, password handling, and user creation |
-| `apps/accounts/views.py` | Registration API view |
-| `apps/accounts/urls.py` | Accounts API URL configuration |
-| `config/urls.py` | Project-level API URL integration |
-| `config/settings.py` | Django REST Framework application registration |
-| `requirements/base.txt` | Backend dependency declaration |
-| `apps/accounts/tests.py` | Account manager, serializer, and API test coverage |
+| `apps/accounts/views.py`       | Registration API view                                               |
+| `apps/accounts/urls.py`        | Accounts API URL configuration                                      |
+| `config/urls.py`               | Project-level API URL integration                                   |
+| `config/settings.py`           | Django REST Framework application registration                      |
+| `requirements/base.txt`        | Backend dependency declaration                                      |
+| `apps/accounts/tests.py`       | Account manager, serializer, and API test coverage                  |
 
 #### Registration Endpoint
 
@@ -625,15 +625,15 @@ The complete test suite covers:
 
 The complete accounts test suite was executed successfully.
 
-| Verification | Result |
-| ------------ | ------ |
-| Tests discovered | 19 |
-| Tests passed | 19 |
-| Tests failed | 0 |
-| Tests with errors | 0 |
-| Django system check | Passed |
+| Verification            | Result |
+| ----------------------- | ------ |
+| Tests discovered        | 19     |
+| Tests passed            | 19     |
+| Tests failed            | 0      |
+| Tests with errors       | 0      |
+| Django system check     | Passed |
 | Python dependency check | Passed |
-| Git whitespace check | Passed |
+| Git whitespace check    | Passed |
 
 Test output:
 
@@ -738,3 +738,334 @@ Continue using the incremental implementation and verification workflow.
 **Project:** NexaMind
 **Commit:** `294c1e4`
 **Status:** Registration API implemented, 19 tests passing, committed and pushed to GitHub
+
+---
+
+# Engineering Journal — November 13, 2026
+
+**Project:** NexaMind
+**Activity:** Registration validation hardening and Conversation database implementation
+**Branch:** `main`
+**Status:** Two commits completed and pushed; 43 automated tests passing
+
+## 1. Daily Development Objectives
+
+Today's development focused on strengthening the existing account-registration implementation and establishing the database foundation for conversation management.
+
+The work covered two main areas:
+
+1. Improving registration serializer validation and error handling.
+2. Implementing the Conversation model, its PostgreSQL schema, and automated model tests.
+
+The objective was to establish reliable backend foundations before proceeding to conversation API implementation.
+
+## 2. Registration Serializer Hardening
+
+Refactored `backend/apps/accounts/serializers.py` to strengthen registration input handling and validation.
+
+### Changes implemented
+
+- Configured password and password-confirmation fields as `write_only`.
+- Disabled whitespace trimming for password fields to preserve intentional password spaces.
+- Added a maximum password input length of 128 characters.
+- Added password input styling for browsable API forms.
+- Normalized email addresses using `strip().lower()`.
+- Added case-insensitive duplicate-email validation using `email__iexact`.
+- Integrated Django's password validators into the serializer's object-level validation.
+- Passed a user instance to Django's password validation mechanism.
+- Returned password validation errors against the password field.
+- Added `IntegrityError` handling during user creation to handle database-level duplicate-email conflicts.
+
+### Engineering lesson
+
+Application-level validation and database-level integrity protection solve different problems.
+
+Checking whether an email already exists before creating a user improves the API response, but concurrent requests can still create a race condition. Database uniqueness constraints remain essential, and the application should handle integrity errors when they occur.
+
+### Commit
+
+`db93d2d` — `refactor: strengthen registration serializer validation`
+
+Changed one file: `backend/apps/accounts/serializers.py`.
+
+## 3. Existing Account and JWT Functionality
+
+The existing account implementation includes:
+
+- Custom email-based user model and manager.
+- Registration API.
+- Password hashing and password validation.
+- Protection against client-assigned privileged account fields.
+- JWT login, refresh, and verification endpoints.
+- Refresh-token rotation and blacklist behavior.
+
+JWT endpoint implementation belongs to an earlier milestone, not today's implementation. However, its existing tests were included in today's combined verification.
+
+## 4. Conversation Application and Database Model
+
+Created the Django application:
+
+`backend/apps/conversations/`
+
+Implemented the `Conversation` model in `backend/apps/conversations/models.py`.
+
+### Model structure
+
+The model includes:
+
+- UUID primary key generated with `uuid.uuid4`.
+- Foreign key to `settings.AUTH_USER_MODEL`.
+- `on_delete=models.CASCADE`.
+- Reverse relationship named `conversations`.
+- Conversation title with a maximum length of 255 characters.
+- Optional custom instructions.
+- Automatically managed creation and update timestamps.
+
+### Database-level design
+
+Implemented a composite database index:
+
+- Fields: `user` and descending `updated_at`.
+- Index name: `conv_user_updated_idx`.
+
+The index supports retrieving a user's conversations in recently updated order.
+
+Also implemented a database check constraint:
+
+- Name: `conv_title_not_blank`.
+- Rejects empty or whitespace-only conversation titles.
+
+The default foreign-key index was disabled because the composite index already begins with the user field.
+
+### Important ownership principle
+
+The user foreign key establishes the ownership relationship between a conversation and its account.
+
+UUID identifiers make record identifiers less predictable and non-sequential, but UUIDs do not provide authorization.
+
+Future conversation API endpoints must enforce ownership through authenticated-user-scoped querysets and appropriate permission checks. A user must never be able to access another user's conversations merely by supplying a conversation UUID.
+
+## 5. PostgreSQL Migration and Schema Verification
+
+Created and applied the initial migration:
+
+`backend/apps/conversations/migrations/0001_initial.py`
+
+Verified that the migration was applied successfully using Django's migration inspection.
+
+Reviewed the generated SQL and inspected the PostgreSQL table schema.
+
+Verified the expected:
+
+- UUID primary key.
+- User foreign-key relationship.
+- Conversation fields.
+- Composite index.
+- Nonblank-title check constraint.
+
+The database schema matched the intended model design.
+
+## 6. Conversation Model Automated Tests
+
+Implemented 16 tests in:
+
+`backend/apps/conversations/tests.py`
+
+The tests cover:
+
+- UUID primary-key type and uniqueness.
+- Conversation ownership.
+- User reverse relationships.
+- Isolation through user-level conversation managers.
+- Title and custom-instruction persistence.
+- Nullable and empty custom instructions.
+- Automatic timestamp creation and updates.
+- Database rejection of empty and whitespace-only titles.
+- User deletion and related conversation deletion.
+- Maximum title-length behavior.
+
+These tests verify model and ORM behavior. They do not yet establish API-level authorization because conversation endpoints have not been implemented.
+
+## 7. Account Test Coverage
+
+The existing account test suite contains 27 tests:
+
+| Test group              |  Tests |
+| ----------------------- | -----: |
+| User manager            |      7 |
+| Registration serializer |      6 |
+| Registration API        |      6 |
+| JWT authentication API  |      8 |
+| **Total**               | **27** |
+
+Coverage includes user creation, password handling, registration validation, email normalization, privilege-escalation prevention, JWT login, token refresh, refresh rotation, token reuse rejection, and token verification.
+
+The test file was not modified by today's registration serializer commit; these were existing tests used to verify the account functionality.
+
+## 8. Combined Verification
+
+Executed:
+
+`python manage.py test apps.accounts apps.conversations`
+
+Result:
+
+- 43 tests discovered.
+- 43 tests passed.
+- 0 failures.
+- 0 errors.
+
+Additional checks:
+
+| Verification                                        | Result                   |
+| --------------------------------------------------- | ------------------------ |
+| `python manage.py check`                            | No system-check issues   |
+| `python manage.py makemigrations --check --dry-run` | No changes detected      |
+| `git diff --check`                                  | No whitespace errors     |
+| PostgreSQL migration inspection                     | Expected schema verified |
+
+The successful test run provides evidence for the behaviors covered by these tests; it does not prove that the entire application is production-ready.
+
+## 9. Git and GitHub Progress
+
+Two commits were created and pushed to `origin/main`.
+
+| Commit    | Description                                                |
+| --------- | ---------------------------------------------------------- |
+| `db93d2d` | Refactor and strengthen registration serializer validation |
+| `a930367` | Add Conversation model and database schema                 |
+
+The Conversation milestone changed nine files, adding 276 lines.
+
+GitHub commit:
+
+https://github.com/tamirattezera/nexamind/commit/a930367
+
+Two architecture diagram files remained untracked and were intentionally excluded from these commits:
+
+- `docs/02-system-design/diagrams/high-level-architecture.png`
+- `docs/02-system-design/diagrams/system_context_Diagram.png`
+
+## 10. Engineering Lessons and Observations
+
+- Serializer validation should provide clear, field-specific feedback.
+- Passwords must preserve intentional whitespace when accepted by the password policy.
+- Application-level duplicate checks do not replace database uniqueness constraints.
+- Database integrity errors should be handled deliberately.
+- UUIDs improve identifier unpredictability but do not replace authorization.
+- Ownership relationships should be reflected in backend querysets and permission checks.
+- Composite indexes should be designed around expected query patterns.
+- Database constraints provide an additional layer of data integrity.
+- ORM tests and API authorization tests verify different layers of application behavior.
+- A passing test suite provides evidence for tested behavior, not proof of complete security or production readiness.
+
+## 11. Current Project Status
+
+### Implemented
+
+- Custom email-based account model and manager.
+- User registration API.
+- Registration validation and password handling.
+- JWT authentication endpoints.
+- Account and authentication automated tests.
+- Conversation Django application.
+- Conversation database model.
+- Initial PostgreSQL migration.
+- Conversation model automated tests.
+- Database indexes and title constraints.
+
+### Not yet implemented
+
+- Conversation creation, retrieval, update, and deletion API endpoints.
+- Conversation ownership enforcement at the API layer.
+- Conversation API tests, including cross-user access rejection.
+- Message model and message persistence.
+- Gemini API integration and conversation context construction.
+- Frontend integration.
+
+The Conversation database foundation is complete, but conversation management through the API is not yet implemented.
+
+## 12. Next Implementation Milestone
+
+The next milestone is **Conversation API implementation**.
+
+Recommended sequence:
+
+1. Inspect the current Conversation model, URL configuration, and views.
+2. Define the API requirements and endpoint behavior.
+3. Implement conversation serializers.
+4. Implement authenticated conversation endpoints.
+5. Scope every conversation queryset to the authenticated user.
+6. Test successful CRUD operations.
+7. Test that User A cannot retrieve, modify, or delete User B's conversations.
+8. Verify all account and conversation tests before committing.
+
+Continue with the inspect-first, implement-incrementally, test-before-commit workflow.
+
+Do not move to message persistence or Gemini integration until conversation ownership and API behavior have been verified.
+
+---
+
+**Entry date:** 2026-11-13
+**Project:** NexaMind
+**Commits:** `db93d2d`, `a930367`
+**Verification:** 43 automated tests passed
+**Git status:** Both commits pushed to `origin/main`
+
+---
+
+## Follow-up: Conversation API Implementation
+
+**Date:** 2026-11-13
+**Milestone:** Conversation CRUD API
+**Status:** Implemented; verification passed; awaiting Git review and commit
+
+### Implementation
+
+Implemented the Conversation API using Django REST Framework generic views.
+
+Endpoints:
+
+| Method    | Endpoint                           | Behavior                                |
+| --------- | ---------------------------------- | --------------------------------------- |
+| GET       | `/api/v1/conversations/`           | List authenticated user's conversations |
+| POST      | `/api/v1/conversations/`           | Create a conversation                   |
+| GET       | `/api/v1/conversations/<uuid:id>/` | Retrieve a conversation                 |
+| PUT/PATCH | `/api/v1/conversations/<uuid:id>/` | Update a conversation                   |
+| DELETE    | `/api/v1/conversations/<uuid:id>/` | Delete a conversation                   |
+
+### Authorization and Ownership
+
+- Conversation querysets are scoped to `request.user`.
+- Conversation ownership is assigned server-side during creation.
+- The serializer prevents clients from modifying the owner, ID, and timestamps.
+- Requests targeting another user's conversation return 404.
+- Authentication is enforced by the global DRF permission configuration.
+
+### Verification
+
+| Verification                                        | Result               |
+| --------------------------------------------------- | -------------------- |
+| Account and conversation tests                      | 62 passed            |
+| `python manage.py check`                            | No issues            |
+| `python manage.py makemigrations --check --dry-run` | No changes detected  |
+| `git diff --check`                                  | No whitespace errors |
+
+The API tests use DRF's `force_authenticate` for authenticated requests. A separate integration test exercising actual JWT token issuance and authentication remains a possible enhancement.
+
+### Current Project Status
+
+Conversation database persistence and the Conversation CRUD API are implemented and tested.
+
+Not yet implemented:
+
+- Message model and message persistence.
+- Message API endpoints.
+- Gemini API integration and conversation context construction.
+- React frontend integration.
+
+### Next Milestone
+
+Design and implement the Message database model, including its relationship to Conversation, role representation, content, timestamps, and ordering.
+
+Conversation ownership and API behavior must remain protected as message functionality is introduced.
