@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     "rest_framework",
     # NexaMind applications
     "apps.accounts",
+    "apps.conversations",
 ]
 AUTH_USER_MODEL = "accounts.User"
 
