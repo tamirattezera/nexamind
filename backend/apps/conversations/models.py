@@ -42,3 +42,56 @@ class Conversation(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class Message(models.Model):
+    class Role(models.TextChoices):
+        SYSTEM = "system", "System"
+        USER = "user", "User"
+        ASSISTANT = "assistant", "Assistant"
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+
+    conversation = models.ForeignKey(
+        Conversation,
+        on_delete=models.CASCADE,
+        related_name="messages",
+        db_index=False,
+    )
+
+    role = models.CharField(
+        max_length=9,
+        choices=Role.choices,
+    )
+
+    content = models.TextField()
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+
+        indexes = [
+            models.Index(
+                fields=["conversation", "created_at", "id"],
+                name="msg_conv_created_idx",
+            ),
+        ]
+
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(role__in=["system", "user", "assistant"]),
+                name="msg_role_valid",
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(content__regex=r"^\s*$"),
+                name="msg_content_not_blank",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.role}: {self.content[:50]}"

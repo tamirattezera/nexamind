@@ -1069,3 +1069,111 @@ Not yet implemented:
 Design and implement the Message database model, including its relationship to Conversation, role representation, content, timestamps, and ordering.
 
 Conversation ownership and API behavior must remain protected as message functionality is introduced.
+
+
+---
+
+## Follow-up: Message Model and Database Persistence
+
+**Date:** 2026-11-22
+**Milestone:** Message model and database foundation
+**Status:** Implemented; migration applied; verification passed; awaiting Git review and commit
+
+### Design
+
+Implemented a single `Message` model in the existing `apps.conversations` Django app.
+
+The model supports three roles:
+- `system`
+- `user`
+- `assistant`
+
+Each message has:
+- UUID primary key.
+- Foreign key to its parent Conversation.
+- Role and text content.
+- Automatically assigned creation timestamp.
+- No `updated_at` field; messages are immutable in the MVP.
+
+### Database Design
+
+- Conversation deletion cascades to its messages.
+- Reverse relationship: `conversation.messages`.
+- Default ordering: `created_at`, then `id`.
+- Composite index: `(conversation, created_at, id)`, named `msg_conv_created_idx`.
+- Database check constraint `msg_role_valid` restricts roles to the three approved values.
+- Database check constraint `msg_content_not_blank` rejects whitespace-only content.
+- The foreign key's individual index is disabled because the composite index begins with `conversation_id`.
+
+### Migration and Database Verification
+
+Created and applied:
+
+`apps/conversations/migrations/0002_message.py`
+
+PostgreSQL inspection confirmed:
+- All expected columns and NOT NULL constraints.
+- UUID primary key.
+- Composite index.
+- Both check constraints.
+- Foreign key to `conversations_conversation`.
+- Cascade deletion behavior configured through Django's foreign-key relationship.
+
+### Automated Tests
+
+Added `MessageModelTests` with 12 tests covering:
+- UUID generation and uniqueness.
+- Valid role choices.
+- Conversation relationship and reverse relationship.
+- Content and role persistence.
+- Automatic timestamp assignment.
+- Deterministic message ordering.
+- Database rejection of invalid roles.
+- Database rejection of whitespace-only content.
+- Cascade deletion.
+- Absence of an `updated_at` field.
+
+### Verification
+
+| Verification | Result |
+|---|---|
+| Message model tests | 12 passed |
+| Full Django test suite | 74 passed |
+| `python manage.py check` | No issues |
+| `python manage.py makemigrations --check --dry-run` | No changes detected |
+| `git diff --check` | No whitespace errors |
+| PostgreSQL schema inspection | Confirmed |
+
+### Current Project Status
+
+Implemented and verified:
+- Account and authentication foundation.
+- Conversation database model and CRUD API.
+- Message database model and persistence foundation.
+
+Not yet implemented:
+- Message API endpoints.
+- Backend-controlled message creation and role assignment.
+- Gemini API integration and conversation context construction.
+- React frontend integration.
+
+### Next Milestone
+
+Design the Message API before implementation.
+
+The API design should address:
+1. Message creation and retrieval behavior.
+2. Conversation ownership enforcement.
+3. Server-controlled role assignment.
+4. Message immutability.
+5. Message ordering and pagination strategy.
+6. How system instructions and conversation history will be assembled for Gemini.
+
+Continue the inspect-first, incremental implementation, and test-before-commit workflow.
+
+---
+
+**Entry date:** 2026-11-22
+**Project:** NexaMind
+**Verification:** 74 automated tests passed
+**Git status:** Changes reviewed locally; not yet committed or pushed

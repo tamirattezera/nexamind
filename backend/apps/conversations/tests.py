@@ -9,7 +9,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 from django.utils import timezone
 
-from .models import Conversation
+from .models import Conversation, Message
 from .serializers import ConversationSerializer
 
 User = get_user_model()
@@ -395,6 +395,159 @@ class ConversationListCreateAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data, [])
+
+
+class MessageModelTests(TestCase):
+    """Tests for message model behavior and database constraints."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="message@example.com",
+            password="StrongTestPassword123!",
+        )
+
+        self.conversation = Conversation.objects.create(
+            user=self.user,
+            title="Message model testing",
+        )
+
+    def test_message_generates_uuid_primary_key(self):
+        message = Message.objects.create(
+            conversation=self.conversation,
+            role=Message.Role.USER,
+            content="Hello, NexaMind!",
+        )
+
+        self.assertIsInstance(message.id, uuid.UUID)
+
+    def test_each_message_has_a_unique_uuid(self):
+        first = Message.objects.create(
+            conversation=self.conversation,
+            role=Message.Role.USER,
+            content="First message",
+        )
+
+        second = Message.objects.create(
+            conversation=self.conversation,
+            role=Message.Role.ASSISTANT,
+            content="Second message",
+        )
+
+        self.assertNotEqual(first.id, second.id)
+
+    def test_message_accepts_all_valid_roles(self):
+        for role in Message.Role.values:
+            with self.subTest(role=role):
+                message = Message.objects.create(
+                    conversation=self.conversation,
+                    role=role,
+                    content=f"Message with role {role}",
+                )
+
+                self.assertEqual(message.role, role)
+
+    def test_message_belongs_to_its_conversation(self):
+        message = Message.objects.create(
+            conversation=self.conversation,
+            role=Message.Role.USER,
+            content="Testing conversation relationship",
+        )
+
+        self.assertEqual(message.conversation, self.conversation)
+        self.assertEqual(
+            message.conversation_id,
+            self.conversation.id,
+        )
+
+    def test_conversation_exposes_its_messages(self):
+        message = Message.objects.create(
+            conversation=self.conversation,
+            role=Message.Role.USER,
+            content="Testing reverse relationship",
+        )
+
+        self.assertIn(message, self.conversation.messages.all())
+
+    def test_message_stores_content_and_role(self):
+        message = Message.objects.create(
+            conversation=self.conversation,
+            role=Message.Role.ASSISTANT,
+            content="This is an assistant response.",
+        )
+
+        self.assertEqual(message.content, "This is an assistant response.")
+        self.assertEqual(message.role, Message.Role.ASSISTANT)
+
+    def test_created_at_is_set_automatically(self):
+        message = Message.objects.create(
+            conversation=self.conversation,
+            role=Message.Role.USER,
+            content="Timestamp test",
+        )
+
+        self.assertIsNotNone(message.created_at)
+
+    def test_messages_are_ordered_by_created_at_and_id(self):
+        first = Message.objects.create(
+            conversation=self.conversation,
+            role=Message.Role.USER,
+            content="First",
+        )
+
+        second = Message.objects.create(
+            conversation=self.conversation,
+            role=Message.Role.ASSISTANT,
+            content="Second",
+        )
+
+        shared_timestamp = timezone.now()
+
+        Message.objects.filter(id__in=[first.id, second.id]).update(
+            created_at=shared_timestamp
+        )
+
+        messages = list(Message.objects.filter(conversation=self.conversation))
+
+        expected_ids = sorted([first.id, second.id])
+        actual_ids = [message.id for message in messages]
+
+        self.assertEqual(actual_ids, expected_ids)
+
+    def test_database_rejects_invalid_role(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Message.objects.create(
+                    conversation=self.conversation,
+                    role="invalid",
+                    content="Invalid role test",
+                )
+
+    def test_database_rejects_whitespace_only_content(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Message.objects.create(
+                    conversation=self.conversation,
+                    role=Message.Role.USER,
+                    content="   \n\t  ",
+                )
+
+    def test_deleting_conversation_deletes_its_messages(self):
+        message = Message.objects.create(
+            conversation=self.conversation,
+            role=Message.Role.USER,
+            content="Message to cascade delete",
+        )
+
+        message_id = message.id
+
+        self.conversation.delete()
+
+        self.assertFalse(Message.objects.filter(id=message_id).exists())
+
+    def test_message_does_not_have_updated_at_field(self):
+        field_names = [field.name for field in Message._meta.get_fields()]
+
+        self.assertNotIn("updated_at", field_names)
 
 
 class ConversationDetailAPITests(APITestCase):
