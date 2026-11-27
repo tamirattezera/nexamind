@@ -65,3 +65,12 @@ class RegistrationSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"email": "A user with this email already exists."}
             )
+
+
+class CurrentUserSerializer(serializers.ModelSerializer):
+    """Serializer for the currently authenticated user's profile."""
+
+    class Meta:
+        model = User
+        fields = ["id", "email", "first_name", "last_name"]
+        read_only_fields = fields

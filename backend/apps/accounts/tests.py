@@ -430,3 +430,50 @@ class JWTAuthenticationAPITests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 401)
+
+
+class CurrentUserAPITests(APITestCase):
+    """Tests for the authenticated current-user endpoint."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="profile@example.com",
+            password="StrongPassword123!",
+            first_name="Test",
+            last_name="User",
+        )
+
+    def test_authenticated_user_can_retrieve_own_profile(self):
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.get("/api/v1/auth/me/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            {
+                "id": self.user.id,
+                "email": "profile@example.com",
+                "first_name": "Test",
+                "last_name": "User",
+            },
+        )
+
+    def test_unauthenticated_user_cannot_retrieve_profile(self):
+        response = self.client.get("/api/v1/auth/me/")
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_profile_response_excludes_sensitive_fields(self):
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.get("/api/v1/auth/me/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            set(response.data.keys()),
+            {"id", "email", "first_name", "last_name"},
+        )
+        self.assertNotIn("password", response.data)
+        self.assertNotIn("is_staff", response.data)
+        self.assertNotIn("is_superuser", response.data)
