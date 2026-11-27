@@ -31,6 +31,28 @@ DEBUG = env.bool("DJANGO_DEBUG", default=False)
 
 ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=[])
 
+# Gemini AI configuration
+GEMINI_API_KEY = env("GEMINI_API_KEY", default="")
+GEMINI_MODEL = env("GEMINI_MODEL", default="gemini-3.8-flash")
+GEMINI_THINKING_LEVEL = env(
+    "GEMINI_THINKING_LEVEL",
+    default="LOW",
+).upper()
+GEMINI_MAX_OUTPUT_TOKENS = env.int(
+    "GEMINI_MAX_OUTPUT_TOKENS",
+    default=8192,
+)
+GEMINI_TIMEOUT_MS = env.int(
+    "GEMINI_TIMEOUT_MS",
+    default=60000,
+)
+
+# Conversation context policy
+CHAT_CONTEXT_MAX_INPUT_TOKENS = env.int(
+    "CHAT_CONTEXT_MAX_INPUT_TOKENS",
+    default=32768,
+)
+
 
 # Application definition
 
@@ -46,6 +68,7 @@ INSTALLED_APPS = [
     # NexaMind applications
     "apps.accounts",
     "apps.conversations",
+    "apps.ai.apps.AIConfig",
 ]
 AUTH_USER_MODEL = "accounts.User"
 
