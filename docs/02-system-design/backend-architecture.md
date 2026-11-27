@@ -46,38 +46,41 @@ The goal is to create a backend that is secure, testable, understandable, and ca
 
 ## 3. Backend Technology Stack
 
-| Technology                      | Responsibility               | Status                                     |
-| ------------------------------- | ---------------------------- | ------------------------------------------ |
-| Python                          | Backend programming language | Selected                                   |
-| Django                          | Backend framework            | Selected                                   |
-| Django REST Framework           | REST API development         | Selected                                   |
-| PostgreSQL                      | Relational database          | Selected                                   |
-| Django ORM                      | Database interaction         | Selected                                   |
-| JWT authentication              | API authentication strategy  | Selected conceptually; implementation TBD  |
-| Gemini official SDK/API         | AI provider integration      | Selected; exact integration to be verified |
-| OpenAPI                         | API documentation            | Planned                                    |
-| Pytest or Django test framework | Automated testing            | To be finalized                            |
+| Technology            | Responsibility               | Status                                                          |
+| --------------------- | ---------------------------- | --------------------------------------------------------------- |
+| Python                | Backend programming language | Selected and in use                                             |
+| Django                | Backend framework            | Installed and configured                                        |
+| Django REST Framework | REST API development         | Installed and configured                                        |
+| PostgreSQL            | Relational database          | Configured as the active Django database backend                |
+| Django ORM            | Database interaction         | Selected and in use                                             |
+| JWT authentication    | API authentication strategy  | SimpleJWT configured; end-to-end behavior requires verification |
+| Google Gemini API     | AI provider integration      | SDK and provider adapter implemented; live API behavior and model compatibility remain unverified |
+| OpenAPI               | API documentation            | Specification drafted; runtime schema integration not configured |
+| Django test framework | Automated testing            | Available through Django; test coverage is being developed      |
+| Pytest                | Alternative test runner      | Optional; not yet selected                                      |
 
-Dependencies and supported versions will be verified during backend initialization.
+The dependency versions currently pinned in `backend/requirements/base.txt` are the implementation baseline. The Gemini SDK and provider adapter are implemented; compatibility of the configured model and live API behavior still requires verification.
+
+JWT configuration currently includes DRF's `JWTAuthentication`, SimpleJWT token endpoints, refresh-token rotation, and blacklist-after-rotation configuration. Configuration and route presence do not by themselves prove the complete authentication lifecycle works correctly. Integration tests must verify token issuance, refresh, invalidation, and protected-resource access.
 
 ## 4. Backend Architectural Style
 
 ### 4.1 Modular Layered Monolith
 
-NexaMind will use a modular Django monolith.
+NexaMind uses a modular Django monolith.
 
-The backend will initially run as one application, but its internal responsibilities will be separated into Django apps and logical layers.
+The backend runs as one application and one deployment unit. Internally, Django apps and logical responsibility layers separate domain behavior, HTTP handling, persistence, and external integrations.
 
 This provides:
 
-- Simpler deployment.
-- Shared database access.
-- Easier transaction management.
-- Straightforward local development.
-- Clearer application boundaries.
+- Simpler deployment and local development.
+- A shared relational database.
+- Straightforward database transaction management.
+- Clearer application and integration boundaries.
 - Lower operational complexity than microservices.
+- Room to introduce additional modules when real requirements justify them.
 
-Each Django app should represent a meaningful application responsibility.
+A Django app represents a meaningful application responsibility. It does not automatically require a separate database, server, or deployment.
 
 ### 4.2 Backend Architecture Diagram
 
@@ -86,32 +89,30 @@ flowchart TB
     Frontend["React Frontend"]
 
     subgraph Backend["Django REST Framework Backend"]
-        subgraph API["API Layer"]
-            URLs["URL Routing"]
+        subgraph API["HTTP / API Layer"]
+            URLs["Versioned URL Routing"]
             Views["API Views"]
             Serializers["Serializers"]
-            Permissions["Permissions"]
+            Permissions["Authentication and Permissions"]
         end
 
-        subgraph Apps["Application Modules"]
-            Accounts["Accounts"]
-            Conversations["Conversations"]
-            Messages["Messages"]
-            Core["Core"]
+        subgraph Apps["Django Applications"]
+            Accounts["Accounts App"]
+            Conversations["Conversations App"]
         end
 
-        subgraph Logic["Application Services"]
-            ConversationService["Conversation Operations"]
-            MessageService["Message Lifecycle"]
-            ContextService["AI Context Construction"]
+        subgraph Domain["Conversation Domain Responsibilities"]
+            ConversationService["Conversation and Message Operations"]
+            Selectors["Read Queries / Selectors"]
+            Models["Conversation, Message, and ChatTurn Models"]
         end
 
-        subgraph AI["AI Integration"]
-            AIService["AI Service"]
-            GeminiAdapter["Gemini Integration"]
+        subgraph Integration["External Integration Boundary"]
+            AI["AI Integration App"]
+            GeminiAdapter["Gemini Provider Adapter"]
         end
 
-        ORM["Django ORM / Data Access"]
+        ORM["Django ORM"]
     end
 
     DB[("PostgreSQL")]
@@ -121,132 +122,125 @@ flowchart TB
     URLs --> Views
     Views --> Serializers
     Views --> Permissions
-
     Views --> Accounts
-    Views --> Conversations
-    Views --> Messages
+    Views --> ConversationService
+    Views --> Selectors
 
-    Conversations --> ConversationService
-    Messages --> MessageService
-    MessageService --> ContextService
-
-    ContextService --> AIService
-    AIService --> GeminiAdapter
+    ConversationService --> Models
+    Selectors --> Models
+    ConversationService --> AI
+    AI --> GeminiAdapter
     GeminiAdapter <-->|"Provider API"| Gemini
 
     Accounts --> ORM
-    ConversationService --> ORM
-    MessageService --> ORM
+    Models --> ORM
     ORM <-->|"ORM / SQL"| DB
 ```
 
-This is a logical responsibility diagram. The actual implementation may use Django models, managers, querysets, services, and selectors to realize these responsibilities.
+**Diagram interpretation:** The diagram represents the logical architecture and the current implementation boundaries. The accounts and conversations apps, AI integration app, Gemini provider adapter, and Conversation, Message, and ChatTurn models exist. The conversation-generation orchestration that coordinates context preparation, persistence, and provider generation remains to be implemented.
+
+The application services and selectors are logical responsibilities. They should be introduced within the appropriate app when their implementation is needed, rather than creating abstractions solely to match a diagram.
 
 ## 5. Django Application Organization
 
-### 5.1 Proposed Applications
+### 5.1 Application Boundaries
 
-The initial backend will use the following Django applications:
+The initial MVP currently uses three Django applications: `accounts`, `conversations`, and `ai`. The `core` app remains deferred until justified.
 
-| Application     | Primary responsibility                                                 |
-| --------------- | ---------------------------------------------------------------------- |
-| `core`          | Shared infrastructure and common application functionality.            |
-| `accounts`      | User model, registration, and authentication-related functionality.    |
-| `conversations` | Conversation records, ownership, and conversation management.          |
-| `messages`      | Message records, message operations, and conversation message history. |
-| `ai`            | AI request orchestration and provider integration.                     |
+| Application     | Primary responsibility                                                                       | Status                   |
+| --------------- | -------------------------------------------------------------------------------------------- | ------------------------ |
+| `accounts`      | Custom user model, registration, and authentication-related functionality                    | Exists                   |
+| `conversations` | Conversation, Message, and ChatTurn persistence; ownership and conversation workflows | Exists                   |
+| `ai`            | Gemini integration and provider-specific communication                                       | Exists                   |
+| `core`          | Shared infrastructure and common functionality                                               | Deferred until justified |
 
-### 5.2 Why Separate Django Apps?
+There will not be a separate `messages` Django app in the initial MVP. Message and ChatTurn are part of the conversation domain and will remain in `apps/conversations/`.
 
-Django apps provide organizational boundaries.
+### 5.2 Application Responsibility Boundaries
 
-For example:
+- `accounts` owns user-related functionality and authentication endpoints.
+- `conversations` owns conversation-related data and workflows, including messages and generation lifecycle coordination.
+- `ai` isolates communication with Gemini and provider-specific behavior.
+- `core` will be introduced only if genuine shared infrastructure emerges that does not naturally belong to an existing application.
 
-- `accounts` owns user-related functionality.
-- `conversations` owns conversation-related functionality.
-- `messages` owns message-related functionality.
-- `ai` owns AI-provider integration.
+The AI integration boundary does not own Conversation, Message, or ChatTurn persistence. The conversation domain coordinates its database operations and invokes the AI integration when generation is required.
 
-This organization makes responsibilities easier to understand.
-
-However, an app boundary does not automatically require a separate database, server, or deployment.
-
-All these apps initially operate inside the same Django backend.
+Keeping these responsibilities in one Django deployment does not make them a single undifferentiated module. Their dependencies and responsibilities should remain explicit.
 
 ### 5.3 Custom User Model
 
-NexaMind will define its custom Django user model in the `accounts` application.
+NexaMind defines its custom Django user model in the `accounts` application.
+
+The current implementation includes:
+
+- A custom `User` model in `apps/accounts/models.py`.
+- `AUTH_USER_MODEL = "accounts.User"` in Django settings.
+- A custom user manager.
 
 **Important implementation constraint:**
 
-The custom user model must be configured through `AUTH_USER_MODEL` before the first database migrations are created.
+The custom user model must be configured before the project's initial migrations are created. Changing the user model after dependent migrations exist can introduce substantial migration complexity.
 
-Why?
+The model and settings configuration are already present. Future changes must preserve compatibility with the approved database design and existing migration history.
 
-Django applications can depend on the user model through foreign-key relationships and authentication behavior. Changing the user model after initial migrations can introduce substantial migration complexity.
+## 6. Backend Directory Structure
 
-Therefore, user-model design is an early backend implementation task.
+The following structure distinguishes the current implementation from planned additions. It is not a requirement to create every planned module immediately.
 
-## 6. Proposed Backend Directory Structure
+### 6.1 Current Backend Structure
+
+The relevant current structure is:
 
 ```text
 backend/
-├── README.md
 ├── manage.py
-│
 ├── requirements/
 │   ├── base.txt
-│   ├── development.txt
-│   └── production.txt
+│   └── development.txt
 │
 ├── config/
 │   ├── __init__.py
+│   ├── settings.py
 │   ├── urls.py
 │   ├── asgi.py
-│   ├── wsgi.py
-│   │
-│   └── settings/
-│       ├── __init__.py
-│       ├── base.py
-│       ├── development.py
-│       └── production.py
+│   └── wsgi.py
 │
+└── apps/
+    ├── __init__.py
+    │
+    ├── accounts/
+    │   ├── apps.py
+    │   ├── models.py
+    │   ├── serializers.py
+    │   ├── views.py
+    │   ├── urls.py
+    │   ├── admin.py
+    │   └── tests.py
+    │
+    └── conversations/
+        ├── apps.py
+        ├── models.py
+        ├── serializers.py
+        ├── views.py
+        ├── urls.py
+        ├── admin.py
+        └── tests.py
+```
+
+This reflects the existing app and configuration organization. It does not imply that every possible service or selector module has already been created.
+
+### 6.2 Planned Additions
+
+As implementation progresses, the following structure may be introduced where justified:
+
+```text
+backend/
 ├── apps/
-│   ├── __init__.py
-│   │
-│   ├── core/
-│   │   ├── apps.py
-│   │   ├── exceptions.py
-│   │   └── tests/
-│   │
 │   ├── accounts/
-│   │   ├── apps.py
-│   │   ├── models.py
-│   │   ├── serializers.py
-│   │   ├── views.py
-│   │   ├── urls.py
-│   │   ├── permissions.py
-│   │   └── tests/
-│   │
 │   ├── conversations/
-│   │   ├── apps.py
-│   │   ├── models.py
-│   │   ├── serializers.py
-│   │   ├── views.py
-│   │   ├── urls.py
-│   │   ├── services.py
+│   │   ├── services/
 │   │   ├── selectors.py
-│   │   └── tests/
-│   │
-│   ├── messages/
-│   │   ├── apps.py
-│   │   ├── models.py
-│   │   ├── serializers.py
-│   │   ├── views.py
-│   │   ├── urls.py
-│   │   ├── services.py
-│   │   ├── selectors.py
-│   │   └── tests/
+│   │   └── ...
 │   │
 │   └── ai/
 │       ├── apps.py
@@ -256,29 +250,35 @@ backend/
 │       │   └── gemini.py
 │       └── tests/
 │
-├── api/
-│   └── v1/
-│       ├── __init__.py
-│       └── urls.py
-│
 └── tests/
-    ├── integration/
-    └── factories/
+    └── integration/
 ```
 
-**Structure note:** This is a target structure, not a requirement to create every file at project initialization. Some modules should be introduced only when their responsibilities become meaningful.
+The exact internal organization can evolve with actual implementation needs.
+
+Architectural constraints:
+
+- Do not create a separate `messages` app for the initial MVP.
+- Keep Message and ChatTurn within `conversations`.
+- Keep Gemini provider communication within the existing `ai` app; extend its capabilities only when justified by implementation needs.
+- Do not introduce `core` without a concrete shared responsibility.
+- Keep the existing single `config/settings.py` arrangement until a justified configuration split is needed.
+- Preserve the existing `/api/v1/` routing approach.
+- Add services, selectors, and test modules when their responsibilities justify them.
 
 ## 7. Backend Responsibility Layers
 
+The backend uses logical responsibility layers. These are boundaries for organizing code, not a requirement to create a separate Python module for every layer.
+
 ### 7.1 URL Routing
 
-**Responsibility:** Map incoming HTTP paths to appropriate API views.
+**Responsibility:** Map incoming HTTP paths to the appropriate API views.
 
-Examples:
+The current project exposes versioned routes through the root Django URL configuration:
 
-- Account endpoints.
-- Conversation endpoints.
-- Message endpoints.
+- `/api/v1/auth/` for authentication endpoints.
+- `/api/v1/conversations/` for conversation endpoints.
+- `/admin/` for Django administration.
 
 Routing should remain simple. Business decisions do not belong in URL configuration.
 
@@ -295,7 +295,7 @@ Views coordinate:
 - Calling application operations.
 - Returning HTTP responses.
 
-Views should not become large collections of database queries and AI orchestration code.
+Views should not become large collections of database queries, domain workflows, or AI-provider orchestration code.
 
 ### 7.3 Serializers
 
@@ -304,66 +304,71 @@ Views should not become large collections of database queries and AI orchestrati
 Examples:
 
 - Registration input.
-- Login input.
-- Conversation creation.
-- Conversation representation.
-- Message submission.
-- Message representation.
+- Conversation creation and representation.
+- Message submission and representation.
 
-Serializers help define the API's data contract.
+Serializers define the API data contract. They are not a replacement for authorization or application-level business rules.
 
-They are not a replacement for authorization or business logic.
+### 7.4 Authentication and Permissions
 
-### 7.4 Permissions
+**Responsibility:** Establish the request identity and enforce access rules.
 
-**Responsibility:** Enforce access rules.
+Authentication identifies the user associated with a request. Authorization determines whether that user may perform the requested operation.
 
 Examples:
 
-- Require authentication.
+- Require a valid access token for protected endpoints.
 - Restrict conversation operations to their owners.
-- Prevent unauthorized message access.
+- Prevent access to messages through conversations the user does not own.
 
-Permissions and ownership checks must be applied consistently across relevant operations.
+Ownership checks must be consistently enforced in the relevant query and operation paths. A frontend-supplied identifier is never proof of authorization.
 
 ### 7.5 Application Services
 
-**Responsibility:** Coordinate operations that change application state or involve multiple components.
+**Responsibility:** Coordinate state-changing operations and workflows involving multiple components.
 
-Examples:
+The primary home for conversation-domain workflows is `apps/conversations/`.
 
-- Create a conversation.
-- Rename a conversation.
-- Delete a conversation.
-- Submit and process a message.
-- Apply custom instructions.
+Potential operations include:
 
-Services help keep complex operations out of HTTP views.
+- Create, rename, and delete conversations.
+- Submit a user message.
+- Coordinate ChatTurn lifecycle transitions.
+- Construct the approved generation context.
+- Invoke the AI integration boundary.
+- Persist successful or failed generation outcomes according to the database design.
+
+Services should be introduced when the workflow complexity justifies them. Simple operations do not need an artificial service abstraction.
 
 ### 7.6 Selectors
 
-**Responsibility:** Organize read-only data retrieval operations when query complexity or reuse justifies it.
+**Responsibility:** Organize read-only data retrieval when query complexity or reuse justifies it.
 
 Examples:
 
 - Retrieve a user's conversations.
 - Retrieve a conversation with its messages.
-- Retrieve a bounded message history.
+- Retrieve bounded message history for generation context.
 
-Selectors are a useful organizational pattern, not a mandatory layer for every database query.
+Selectors are an organizational pattern, not a mandatory layer for every database query.
 
 ### 7.7 Models and Persistence
 
 **Responsibility:** Represent and persist application data.
 
+The `accounts` app owns the User model.
+
+The `conversations` app owns the Conversation, Message, and ChatTurn models.
+
 Django models define:
 
-- Fields.
-- Relationships.
+- Fields and relationships.
 - Database constraints.
 - Model-level behavior where appropriate.
 
-The ORM manages communication with PostgreSQL.
+The Django ORM manages communication with PostgreSQL. Application services coordinate multi-step writes, while database constraints protect data integrity.
+
+The AI integration app, when introduced, must not take ownership of conversation-domain persistence.
 
 ## 8. Accounts Architecture
 
@@ -373,42 +378,41 @@ Location: `apps/accounts/`
 
 - Define the custom user model.
 - Support user registration.
-- Support authentication-related operations.
-- Enforce unique account identifiers.
+- Provide authentication endpoints.
+- Enforce account identity and validation rules.
 - Provide user-related serializers.
-- Support authentication tests.
+- Support authentication and account tests.
 
 ### 8.2 User Model Design Considerations
 
-The user model must support:
+The custom user model must support:
 
 - A stable primary key.
-- A unique login identifier.
+- The approved account fields and relationships.
 - Secure password storage through Django's authentication mechanisms.
-- Account timestamps where useful.
+- Account timestamps where defined by the database design.
 - Appropriate account status fields.
 
-The exact model fields and login identifier will be finalized during database design.
+The remaining account decisions, including the login identifier and associated registration validation rules, must remain consistent with the database design and resolved product policies.
 
 ### 8.3 Authentication Flow
 
-```mermaid
-sequenceDiagram
-    actor User
-    participant API as DRF API
-    participant Auth as Authentication Layer
-    participant DB as PostgreSQL
+The current account URL configuration exposes:
 
-    User->>API: Submit credentials
-    API->>Auth: Authenticate
-    Auth->>DB: Retrieve user
-    DB-->>Auth: User record
-    Auth->>Auth: Verify credentials
-    Auth-->>API: Authentication result
-    API-->>User: Return response
-```
+- `POST /api/v1/auth/register/` for registration.
+- `POST /api/v1/auth/login/` for obtaining a token pair.
+- `POST /api/v1/auth/token/refresh/` for refreshing an access token.
+- `POST /api/v1/auth/token/verify/` for token verification.
 
-The JWT implementation, refresh strategy, and token lifecycle will be documented separately before implementation.
+DRF is configured to use SimpleJWT's `JWTAuthentication`. Refresh-token rotation and blacklist-after-rotation are enabled in the current configuration.
+
+The following distinction is important:
+
+- JWT packages, authentication configuration, and routes are implemented.
+- End-to-end token issuance, refresh, invalidation, and protected-resource behavior still require integration testing.
+- The final login identifier, token lifetime policy, and complete logout/invalidation behavior must be verified against the account requirements and security design.
+
+Authentication establishes the request identity. Authorization and conversation ownership checks determine which resources that identity may access.
 
 ## 9. Conversations Architecture
 
@@ -416,19 +420,22 @@ Location: `apps/conversations/`
 
 ### 9.1 Responsibilities
 
-- Create conversations.
-- Retrieve conversations.
-- List a user's conversations.
-- Rename conversations.
-- Delete conversations.
+The conversations application owns the conversation domain, including:
+
+- Create, retrieve, list, rename, and delete conversations.
 - Store conversation-specific custom instructions.
+- Persist messages associated with conversations.
+- Coordinate ChatTurn generation lifecycles.
 - Enforce conversation ownership.
+- Retrieve bounded conversation history when required.
+
+Conversation, Message, and ChatTurn belong to this application. They are not divided across separate Django apps in the initial MVP.
 
 ### 9.2 Ownership Principle
 
 Every conversation belongs to one user in the initial MVP.
 
-The backend must scope conversation queries to the authenticated user.
+The backend must scope conversation queries and operations to the authenticated user.
 
 Conceptually:
 
@@ -442,35 +449,42 @@ Retrieve only conversations owned by that user
 Perform authorized operation
 ```
 
-The actual database queries and permission implementation will be designed during backend development.
+A conversation identifier supplied by the frontend is not proof of ownership. The backend must verify ownership before retrieving, modifying, deleting, or generating content for a conversation.
 
 ### 9.3 Custom Instructions
 
 Conversation-specific instructions belong to the conversation domain.
 
-They should not be stored as an unrelated global preference when the intended behavior is to configure instructions independently for each conversation.
+They are stored and managed as part of the conversation configuration rather than as an unrelated global preference.
 
-## 10. Messages Architecture
+The conversation workflow is responsible for applying the appropriate instructions when constructing generation context. The AI integration receives the resulting structured generation request; it does not own conversation configuration or persistence.
 
-Location: `apps/messages/`
+## 10. Message Domain Architecture
+
+Location: `apps/conversations/`
+
+Message handling is part of the conversations domain. This section describes message responsibilities, not a separate Django application.
 
 ### 10.1 Responsibilities
 
-- Accept message submissions.
-- Validate message content.
-- Associate messages with conversations.
-- Retrieve message history.
-- Preserve message ordering.
-- Coordinate message processing.
-- Support message persistence and failure handling.
+The conversations application is responsible for:
+
+- Accepting and validating message submissions.
+- Associating messages with their conversations.
+- Persisting user and assistant messages.
+- Retrieving message history.
+- Preserving message ordering.
+- Coordinating ChatTurn lifecycle transitions.
+- Handling generation success and failure consistently.
+- Enforcing the idempotency requirements for new generation submissions.
+
+The `Message` and `ChatTurn` models exist in `apps/conversations/models.py`. Their implementation and migration history are documented in the approved database design.
 
 ### 10.2 Message Ownership
 
 Messages belong to conversations.
 
 A user can access a message only through a conversation they are authorized to access.
-
-This creates an ownership relationship:
 
 ```text
 User
@@ -481,72 +495,78 @@ Conversation
   |
   | contains
   v
-Messages
+Messages and ChatTurns
 ```
 
 The backend must not trust a conversation identifier supplied by the frontend without verifying ownership.
 
+Message retrieval, mutation where permitted, and generation operations must follow the conversation's owner-scoped access rules.
+
 ### 10.3 Message Roles
 
-The initial system will distinguish between:
+The initial system distinguishes between:
 
 - `user`
 - `assistant`
 
-The exact model choices, allowed values, and any future system/tool roles will be finalized during database design and AI integration.
+The database design defines the initial message role model. Additional system or tool roles are not part of the initial MVP unless a later requirement justifies them.
 
-## 11. AI Architecture
+## 11. AI Integration Architecture
 
 Location: `apps/ai/`
 
+The AI integration application isolates communication with Gemini from the conversation domain. The application and its Gemini provider adapter are implemented; conversation-generation orchestration remains the responsibility of the conversations domain and is not yet implemented.
+
 ### 11.1 Responsibilities
 
-The AI application is responsible for coordinating communication with the selected AI provider.
+The AI integration boundary is responsible for:
 
-It must:
+- Receiving a structured generation request from the conversation workflow.
+- Applying the configured Gemini model and supported generation settings.
+- Submitting the request to Gemini.
+- Normalizing successful provider responses into an application-level result.
+- Translating provider-specific errors into application-level failures.
+- Applying appropriate timeout and error-handling behavior.
 
-- Receive a structured generation request.
-- Apply the configured model.
-- Construct the provider input using approved context.
-- Apply custom instructions.
-- Apply supported generation settings.
-- Call Gemini.
-- Process the response.
-- Handle provider errors.
-- Return normalized application-level results.
+It will not own Conversation, Message, or ChatTurn persistence.
 
-### 11.2 AI Service and Provider Separation
+The conversation domain remains responsible for authorization, conversation-specific instructions, context selection, message persistence, idempotency, and generation lifecycle management.
 
-The application should distinguish between two responsibilities.
+### 11.2 Conversation Workflow and Provider Separation
 
-**AI service**
+The architecture separates two responsibilities.
 
-Coordinates application-level AI behavior.
+**Conversation application service**
 
-Examples:
+Coordinates the domain workflow, including:
 
-- Prepare generation input.
-- Apply context policy.
-- Select generation configuration.
-- Coordinate provider invocation.
-- Process results.
+- Validating the authorized conversation.
+- Persisting the submitted user message and generation lifecycle record.
+- Constructing context from approved conversation history.
+- Applying conversation-specific instructions.
+- Creating the structured generation request.
+- Invoking the AI integration.
+- Persisting the assistant result or recording generation failure.
 
-**Gemini integration**
+**AI integration and Gemini adapter**
 
-Handles provider-specific communication.
+Handle provider communication, including:
 
-Examples:
+- Configuring the official SDK.
+- Reading the backend-only API credential.
+- Submitting generation requests.
+- Interpreting provider responses.
+- Normalizing provider-specific errors.
 
-- Configure the official SDK.
-- Use the API credential.
-- Submit Gemini requests.
-- Interpret Gemini responses.
-- Translate provider-specific errors.
+This boundary prevents Gemini-specific implementation details from spreading through conversation-domain code.
 
-### 11.3 Proposed AI Structure
+### 11.3 Current AI Structure and Extension Policy
+
+The current integration uses an intentionally small structure:
 
 ```text
 apps/ai/
+├── apps.py
 ├── services.py
 ├── config.py
 ├── providers/
@@ -554,13 +574,11 @@ apps/ai/
 └── tests/
 ```
 
-This is intentionally small.
-
 A generalized provider factory, abstract provider hierarchy, or multiple provider adapters are not required when Gemini is the only initial provider.
 
-If a second provider becomes a real requirement, the integration boundary can be refactored based on actual shared behavior.
+If another provider becomes a real requirement, the integration boundary can be extended based on actual shared behavior.
 
-### 11.4 Provider Credential Management
+### 11.4 Provider Configuration and Credential Management
 
 The Gemini API key must:
 
@@ -570,73 +588,78 @@ The Gemini API key must:
 - Never be exposed in frontend environment variables.
 - Be handled carefully in application logs.
 
-The exact SDK, model identifier, and API methods must be verified against current official Google documentation during integration.
+The SDK version is pinned and the provider request format and API methods are implemented. Compatibility of the configured model and live API behavior remain to be verified against current official Google documentation.
 
 ## 12. Message Processing Architecture
 
-Sending a message is one of the backend's most important application workflows.
+Sending a message is a critical conversation-domain workflow. The conversation application coordinates authorization, persistence, idempotency, context construction, and the generation lifecycle. The AI integration handles the external provider request.
 
 ### 12.1 High-Level Processing Sequence
+
+The following sequence describes the intended successful workflow:
 
 ```mermaid
 sequenceDiagram
     actor User
     participant API as DRF View
     participant Auth as Authentication
-    participant Permission as Ownership Check
-    participant Service as Message Service
+    participant Service as Conversation Service
     participant DB as PostgreSQL
-    participant AI as AI Service
+    participant AI as AI Integration
     participant Gemini as Gemini API
 
-    User->>API: Submit message
+    User->>API: Submit message with idempotency key
     API->>Auth: Verify identity
     Auth-->>API: Authenticated user
-    API->>Permission: Verify conversation access
-    Permission-->>API: Access decision
-    API->>Service: Process message
-    Service->>DB: Retrieve conversation history
-    DB-->>Service: Existing messages
-    Service->>AI: Prepare generation request
+    API->>Service: Process authorized submission
+    Service->>DB: Verify ownership and idempotency
+    DB-->>Service: Authorized conversation and submission state
+    Service->>DB: Persist ChatTurn and user Message
+    DB-->>Service: User submission persisted
+    Service->>Service: Construct approved generation context
+    Service->>AI: Send structured generation request
     AI->>Gemini: Generate response
     Gemini-->>AI: Provider response
-    AI-->>Service: Processed result
-    Service->>DB: Persist successful response
+    AI-->>Service: Normalized result
+    Service->>DB: Persist assistant Message and complete ChatTurn
     DB-->>Service: Persistence result
     Service-->>API: Application result
     API-->>User: Structured response
 ```
 
-This represents the successful generation path.
+The sequence is a logical representation of the successful path. The implementation must preserve the database design's transaction boundaries and idempotency rules.
 
-### 12.2 Message Lifecycle Questions
+### 12.2 Failure Handling and Idempotency
 
-Before implementing this workflow, the following behavior must be decided:
+The workflow must account for failures between database operations and the external provider call.
 
-1. At what point is the user message persisted?
-2. What happens when Gemini fails after the user message has been stored?
-3. Should failed generation attempts have a persisted status?
-4. How are duplicate submissions handled?
-5. What happens if generation succeeds but database persistence fails?
-6. How should the frontend recover from an interrupted request?
+The approved database design establishes these principles:
 
-These are important because a database transaction cannot automatically roll back an external Gemini API operation.
+1. A new generation submission requires a valid UUID v4 `Idempotency-Key` header, as defined in the approved database design.
+2. The original user Message must be preserved if generation fails.
+3. A completed ChatTurn must not exist without its required assistant Message.
+4. Generation lifecycle state belongs to ChatTurn, not to mutable Message records.
+5. Database transactions protect database consistency but cannot roll back a Gemini operation that has already occurred.
 
-The application must define explicit behavior rather than assuming that database transactions and external API calls form one atomic operation.
+The conversation workflow must record generation failure according to the approved ChatTurn lifecycle design. A retry or duplicate submission must follow the idempotency policy rather than silently creating another generation.
+
+If Gemini succeeds but the assistant result cannot be persisted, the backend must handle that consistency failure explicitly. It must not report a completed persisted response when the required database records are absent.
 
 ### 12.3 Transaction Considerations
 
 Database transactions should protect operations that require database consistency.
 
-However, external AI generation should not be treated as part of a normal database transaction with guaranteed rollback of the external operation.
+The external Gemini request must not be treated as part of a database transaction with guaranteed rollback.
 
-A later implementation decision must define:
+Implementation must follow the approved database design for:
 
-- Persistence order.
-- Transaction boundaries.
-- Failure statuses.
-- Retry behavior.
-- Duplicate-request protection.
+- User-message and ChatTurn creation.
+- Idempotency-key enforcement.
+- Assistant-message persistence.
+- ChatTurn completion and failure recording.
+- Recovery from interrupted or stale generation attempts.
+
+The conversation workflow owns these persistence and lifecycle decisions. The AI integration returns provider results and does not independently modify conversation-domain records.
 
 ## 13. Database Interaction Architecture
 
@@ -649,13 +672,20 @@ The initial domain model is:
 ```text
 User
  |
- | 1:N
+ | 1:N owns
  |
 Conversation
  |
- | 1:N
- |
-Message
+ +----------------------+
+ |                      |
+ | 1:N contains         | 1:N has
+ |                      |
+Message                ChatTurn
+                          |
+                          +---- references one user Message
+                          |
+                          +---- references zero or one
+                                assistant Message
 ```
 
 Conversation-specific custom instructions are initially stored as part of the conversation.
@@ -714,7 +744,7 @@ API contracts should use:
 - Predictable validation errors.
 - Explicit pagination metadata where required.
 
-Exact endpoint paths and JSON schemas will be documented separately in the API design phase.
+Exact endpoint paths, request and response schemas, and API contracts are maintained in the API documentation under `docs/03-api/`, including the endpoint reference and OpenAPI specification.
 
 ## 15. Error Handling Architecture
 
@@ -891,50 +921,53 @@ The initial backend must avoid:
 
 ## 20. Open Decisions
 
-The following decisions remain unresolved:
+The following decisions remain unresolved or require implementation verification:
 
-1. Exact custom user model fields.
-2. JWT implementation and token lifecycle.
-3. Login identifier and registration validation rules.
-4. Conversation and message model fields.
-5. Message failure-status representation.
-6. Transaction boundaries for message processing.
-7. Gemini SDK version and supported model.
-8. Provider timeout and retry policy.
-9. Context construction and history limits.
-10. Message pagination strategy.
-11. API error response format.
-12. Logging and monitoring configuration.
-13. Production database connection strategy.
-14. Whether background processing is needed for any future operation.
+1. Final login identifier and associated registration validation rules.
+2. Email verification policy.
+3. Account deletion and data-retention policy.
+4. Final JWT token lifetime and logout/invalidation behavior, including end-to-end verification of the configured token flow.
+5. Compatibility of the configured Gemini SDK version and model identifier with live Gemini API behavior.
+6. Provider timeout, retry, and rate-limit handling policy.
+7. API error response format.
+8. Logging, monitoring, and operational observability configuration.
+9. Production database connection and deployment strategy.
+10. Whether background processing is justified for a future operation.
 
-These decisions will be resolved in their appropriate engineering phases.
+The database design already establishes the core Conversation, Message, ChatTurn, ownership, idempotency, message lifecycle, transaction, context-selection, and pagination decisions. Those decisions should be treated as the source of truth rather than reopened here.
+
+Remaining decisions will be resolved in their appropriate engineering phases.
 
 ## 21. Backend Architecture Review Checklist
 
-Before backend implementation, verify:
+Use this checklist during implementation and before considering the backend architecture ready for broader integration.
 
-- [ ] Django apps have clear responsibilities.
-- [ ] A custom user model is planned before initial migrations.
+- [ ] Django applications have clear and enforced responsibilities.
+- [ ] The custom user model and existing migration history remain aligned.
+- [ ] JWT token issuance, refresh, invalidation, and protected access are tested end-to-end.
 - [ ] API views remain focused on HTTP coordination.
 - [ ] Serializers handle request validation and response representation.
-- [ ] Authentication and authorization are separated.
-- [ ] Conversation ownership is enforced server-side.
-- [ ] Application services coordinate complex operations.
+- [ ] Authentication and authorization are treated as separate concerns.
+- [ ] Conversation ownership is enforced server-side for every relevant operation.
+- [ ] Conversation, Message, and ChatTurn persistence follow the approved database design.
+- [ ] New generation submissions enforce idempotency.
+- [ ] Failed generation preserves the original user Message.
+- [ ] A completed ChatTurn always has its required assistant Message.
+- [ ] Conversation application services coordinate complex domain workflows.
 - [ ] Read operations are separated where query complexity justifies it.
-- [ ] Gemini integration is isolated.
-- [ ] API credentials remain backend-only.
-- [ ] Message persistence and failure behavior are understood.
-- [ ] Database transactions have explicit boundaries.
-- [ ] API versioning is planned.
-- [ ] Error handling is consistent.
-- [ ] Tests cover security and provider failures.
-- [ ] Unnecessary abstractions are avoided.
+- [ ] Gemini integration is isolated from conversation-domain persistence.
+- [ ] Provider credentials remain backend-only.
+- [ ] Provider failures and persistence failures are handled explicitly.
+- [ ] Database transactions follow the approved transaction boundaries.
+- [ ] `/api/v1/` versioning remains consistent.
+- [ ] API errors are consistent and do not expose internal details.
+- [ ] Tests cover cross-user isolation, idempotency, lifecycle failures, and provider errors.
+- [ ] Unnecessary abstractions and premature infrastructure are avoided.
 
 ---
 
-**Document status:** Draft — System Design
+**Document status:** Draft — System Design. The architectural decisions in this document have been aligned with the approved database design; implementation and integration verification remain in progress.
 
-**Next review:** Before Django project initialization and implementation of the first backend application.
+**Next review:** Before completing the conversation-generation workflow and integrating Gemini.
 
-**Core principle:** Keep HTTP handling, application behavior, persistence, and AI-provider communication separate enough to test and maintain independently—without overengineering a single-backend MVP.
+**Core principle:** Keep HTTP handling, conversation-domain behavior, persistence, and AI-provider communication separate enough to test and maintain independently—without overengineering a single-backend MVP.
