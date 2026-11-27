@@ -1,10 +1,13 @@
+from django.shortcuts import get_object_or_404
 from rest_framework.generics import (
+    ListAPIView,
     ListCreateAPIView,
     RetrieveUpdateDestroyAPIView,
 )
 
-from .models import Conversation
-from .serializers import ConversationSerializer
+from .models import Conversation, Message
+from .pagination import MessageCursorPagination
+from .serializers import ConversationSerializer, MessageSerializer
 
 
 class ConversationListCreateView(ListCreateAPIView):
@@ -27,3 +30,19 @@ class ConversationDetailView(RetrieveUpdateDestroyAPIView):
 
     def get_queryset(self):
         return Conversation.objects.filter(user=self.request.user)
+
+
+
+class MessageListView(ListAPIView):
+    """List messages from a conversation owned by the authenticated user."""
+
+    serializer_class = MessageSerializer
+    pagination_class = MessageCursorPagination
+
+    def get_queryset(self):
+        conversation = get_object_or_404(
+            Conversation.objects.filter(user=self.request.user),
+            id=self.kwargs["id"],
+        )
+
+        return Message.objects.filter(conversation=conversation)

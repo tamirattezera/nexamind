@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import Conversation
+from .models import Conversation, Message
 
 
 class ConversationSerializer(serializers.ModelSerializer):
@@ -22,3 +22,18 @@ class ConversationSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+
+
+
+class MessageSerializer(serializers.ModelSerializer):
+    """Read-only serializer for conversation messages."""
+
+    class Meta:
+        model = Message
+        fields = [
+            "id",
+            "role",
+            "content",
+            "created_at",
+        ]
+        read_only_fields = fields
