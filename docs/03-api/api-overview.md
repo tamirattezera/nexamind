@@ -178,14 +178,15 @@ Base path:
 
 Planned operations:
 
-| Operation     | Method | Endpoint                      |
-| ------------- | ------ | ----------------------------- |
-| Register      | POST   | `/api/v1/auth/register/`      |
-| Login         | POST   | `/api/v1/auth/login/`         |
-| Refresh token | POST   | `/api/v1/auth/token/refresh/` |
-| Current user  | GET    | `/api/v1/auth/me/`            |
+| Operation       | Method | Endpoint                         |
+| --------------- | ------ | -------------------------------- |
+| Register        | POST   | `/api/v1/auth/register/`         |
+| Login           | POST   | `/api/v1/auth/login/`            |
+| Refresh token   | POST   | `/api/v1/auth/token/refresh/`    |
+| Verify token    | POST   | `/api/v1/auth/token/verify/`     |
+| Current user    | GET    | `/api/v1/auth/me/`               |
 
-The final authentication implementation will define token storage, expiration, refresh behavior, and logout semantics.
+JWT authentication is implemented using SimpleJWT. Access tokens expire after 15 minutes and refresh tokens after 7 days. Successful refresh operations rotate the refresh token and blacklist the submitted token. Frontend token storage and logout semantics remain to be finalized.
 
 ### 5.2 Conversations
 
@@ -241,7 +242,7 @@ The exact persistence and error-handling behavior will be specified during imple
 
 ## 6. Authentication and Authorization
 
-Protected endpoints will use JWT-based authentication.
+Protected endpoints use JWT-based authentication.
 
 The frontend will attach the required authentication credential to protected API requests according to the final token-storage design.
 
@@ -411,14 +412,14 @@ Gemini API calls should be mocked in ordinary automated tests so that tests do n
 | ----------------------- | ------------------------------------ |
 | REST architecture       | Planned                              |
 | API versioning          | Defined                              |
-| Authentication strategy | JWT selected; implementation pending |
+| Authentication strategy | JWT implemented; token storage and logout pending |
 | Conversation endpoints  | Proposed                             |
 | Message endpoints       | Proposed                             |
 | Error conventions       | Proposed                             |
 | Pagination              | Planned                              |
-| OpenAPI documentation   | Planned                              |
-| API implementation      | Not started                          |
-| API tests               | Not started                          |
+| OpenAPI documentation   | In progress                          |
+| API implementation      | In progress                          |
+| API tests               | In progress                          |
 
 ## 15. Related Documents
 

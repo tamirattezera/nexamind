@@ -31,7 +31,9 @@ paths:
       tags:
         - Authentication
       summary: Register a user
-      description: Create a new NexaMind account.
+      description: >
+        Create a new NexaMind account using an email address and password.
+        Password confirmation is required and is not returned.
       security: []
       operationId: registerUser
       requestBody:
@@ -49,8 +51,6 @@ paths:
                 $ref: "#/components/schemas/RegisterResponse"
         "400":
           $ref: "#/components/responses/ValidationError"
-        "409":
-          description: Account identifier conflict
 
   /auth/login/:
     post:
@@ -93,15 +93,46 @@ paths:
               $ref: "#/components/schemas/RefreshTokenRequest"
       responses:
         "200":
-          description: Access token refreshed
+          description: Access token refreshed and refresh token rotated; the submitted refresh token is blacklisted
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AccessTokenResponse"
+                $ref: "#/components/schemas/TokenResponse"
         "400":
           $ref: "#/components/responses/ValidationError"
         "401":
           description: Invalid or expired refresh token
+
+  /auth/token/verify/:
+    post:
+      tags:
+        - Authentication
+      summary: Verify token
+      description: >
+        Validate a token's signature, expiration, and blacklist status.
+        This endpoint does not verify the token type or establish that the
+        token is suitable for a particular authentication purpose.
+      security: []
+      operationId: verifyToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TokenVerifyRequest"
+      responses:
+        "200":
+          description: Token is valid
+          content:
+            application/json:
+              schema:
+                type: object
+                maxProperties: 0
+                additionalProperties: false
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /auth/me/:
     get:
@@ -249,11 +280,30 @@ paths:
         - Messages
       summary: Send message and generate AI response
       description: |
-        Submit user content to a conversation.
-        The backend validates ownership, constructs conversation context,
-        calls the configured Gemini provider, and returns persisted messages.
-        The client cannot choose the stored message role or provider credentials.
+        Submit user content to a conversation. Every new generation
+        submission requires a UUID v4 Idempotency-Key header.
+
+        A completed replay with the same key and identical normalized
+        content returns the original response. An in-progress replay
+        returns 202 and creates no additional Message or ChatTurn.
+        Reusing a key with different normalized content returns 409.
+
+        Context preflight occurs before Transaction A. Preflight failures
+        create neither a user Message nor a ChatTurn and do not reserve
+        the idempotency key. CHAT_CONTEXT_LIMIT_EXCEEDED maps to 400;
+        CHAT_CONTEXT_UNAVAILABLE maps to 503.
+
+        After Transaction A commits, a generation or subsequent
+        processing failure preserves the user Message and transitions
+        the existing ChatTurn to FAILED. A failed replay returns the
+        same mapped HTTP status as its recorded failure.
+
+        The backend controls ownership, context construction, provider
+        communication, stored message roles, and generation metadata.
+        Provider calls occur outside database transactions and row locks.
       operationId: sendMessage
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -262,23 +312,63 @@ paths:
               $ref: "#/components/schemas/SendMessageRequest"
       responses:
         "201":
-          description: User and assistant messages created
+          description: New generation completed successfully
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/SendMessageResponse"
+        "200":
+          description: Idempotent replay of a completed generation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SendMessageResponse"
+        "202":
+          description: Matching generation submission is still processing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProcessingResponse"
         "400":
-          $ref: "#/components/responses/ValidationError"
+          description: Invalid message, idempotency key, or mandatory context budget exceeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          description: Idempotency key reused with different normalized content
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "429":
-          description: Application or provider rate limit reached
+          description: Application rate limit reached
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "502":
-          description: AI provider failure
+          description: AI provider failure or unusable provider response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: Required conversation context is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "504":
-          description: AI provider timeout
+          description: AI provider request timed out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -319,51 +409,75 @@ components:
         maximum: 100
         default: 20
 
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: >
+        UUID v4 identifying a generation submission. Reuse the same key
+        and identical request content when retrying an in-progress or
+        completed submission.
+      schema:
+        type: string
+        format: uuid
+        pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$'
+
   schemas:
     RegisterRequest:
       type: object
       additionalProperties: false
       required:
-        - username
         - email
         - password
         - password_confirm
       properties:
-        username:
-          type: string
-          minLength: 3
-          maxLength: 150
         email:
           type: string
           format: email
         password:
           type: string
           format: password
+          description: >
+            Must be 8–128 characters and pass the configured Django password
+            validators, including user-attribute similarity, common-password,
+            and numeric-password checks. Leading and trailing whitespace is
+            preserved.
           minLength: 8
+          maxLength: 128
         password_confirm:
           type: string
           format: password
+          description: >
+            Must exactly match the password. Leading and trailing whitespace
+            is preserved.
+          minLength: 8
+          maxLength: 128
 
     RegisterResponse:
       type: object
+      additionalProperties: false
       required:
-        - user
-        - message
+        - id
+        - email
       properties:
-        user:
-          $ref: "#/components/schemas/User"
-        message:
+        id:
+          type: integer
+          readOnly: true
+        email:
           type: string
+          format: email
+          readOnly: true
 
     LoginRequest:
       type: object
       additionalProperties: false
       required:
-        - username
+        - email
         - password
       properties:
-        username:
+        email:
           type: string
+          format: email
         password:
           type: string
           format: password
@@ -387,29 +501,36 @@ components:
         refresh:
           type: string
 
-    AccessTokenResponse:
+    TokenVerifyRequest:
       type: object
+      additionalProperties: false
       required:
-        - access
+        - token
       properties:
-        access:
+        token:
           type: string
 
     User:
       type: object
       required:
         - id
-        - username
         - email
+        - first_name
+        - last_name
       properties:
         id:
-          type: string
-          format: uuid
-        username:
-          type: string
+          type: integer
+          readOnly: true
         email:
           type: string
           format: email
+          readOnly: true
+        first_name:
+          type: string
+          readOnly: true
+        last_name:
+          type: string
+          readOnly: true
 
     ConversationCreate:
       type: object
@@ -542,6 +663,20 @@ components:
           $ref: "#/components/schemas/Message"
         assistant_message:
           $ref: "#/components/schemas/Message"
+
+    ProcessingResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - message
+      properties:
+        status:
+          type: string
+          const: processing
+        message:
+          type: string
+          const: This request is still being processed. Retry the same request with the same Idempotency-Key.
 
     ConversationList:
       type: object

@@ -98,7 +98,6 @@ Request:
 
 ```json
 {
-  "username": "example_user",
   "email": "user@example.com",
   "password": "StrongPassword123!",
   "password_confirm": "StrongPassword123!"
@@ -107,12 +106,11 @@ Request:
 
 Field requirements:
 
-| Field            | Type   | Required | Description                                |
-| ---------------- | ------ | -------- | ------------------------------------------ |
-| username         | string | Yes      | Unique username                            |
-| email            | string | Yes      | Valid email address                        |
-| password         | string | Yes      | Password meeting configured security rules |
-| password_confirm | string | Yes      | Must match password                        |
+| Field            | Type   | Required | Description |
+| ---------------- | ------ | -------- | ----------- |
+| email            | string | Yes      | Unique, valid email address |
+| password         | string | Yes      | Password satisfying configured Django validators; 8–128 characters |
+| password_confirm | string | Yes      | Must exactly match the password |
 
 Expected response:
 
@@ -120,19 +118,14 @@ Expected response:
 
 ```json
 {
-  "user": {
-    "id": "user-uuid",
-    "username": "example_user",
-    "email": "user@example.com"
-  },
-  "message": "Account created successfully."
+  "id": 1,
+  "email": "user@example.com"
 }
 ```
 
 Possible errors:
 
-- `400` — Invalid registration data.
-- `409` — Account identifier conflict, if this status is adopted for duplicate accounts.
+- `400` — Invalid registration data, password validation failure, password mismatch, or duplicate email.
 
 Security requirements:
 
@@ -146,13 +139,13 @@ Security requirements:
 
 **Authentication:** Public
 
-**Purpose:** Authenticate a user and issue JWT credentials.
+**Purpose:** Authenticate a user and issue a JWT access and refresh token pair.
 
 Request:
 
 ```json
 {
-  "username": "example_user",
+  "email": "user@example.com",
   "password": "StrongPassword123!"
 }
 ```
@@ -168,7 +161,6 @@ Expected response:
 }
 ```
 
-The exact response may include user information if required by the selected authentication library.
 
 Possible errors:
 
@@ -177,7 +169,7 @@ Possible errors:
 
 Security requirements:
 
-- Do not reveal whether the username or password was incorrect.
+- Do not reveal whether the email or password was incorrect.
 - Apply suitable login throttling.
 - Do not log credentials or tokens.
 - Final token storage and transport strategy must be documented before frontend authentication is implemented.
@@ -188,7 +180,7 @@ Security requirements:
 
 **Authentication:** Refresh token
 
-**Purpose:** Obtain a new access token using a valid refresh token.
+**Purpose:** Obtain a new access token and rotate the refresh token.
 
 Request:
 
@@ -204,16 +196,50 @@ Expected response:
 
 ```json
 {
-  "access": "<new-access-token>"
+  "access": "<new-access-token>",
+  "refresh": "<new-refresh-token>"
 }
 ```
+
+The submitted refresh token is blacklisted after successful rotation.
 
 Possible errors:
 
 - `400` — Missing or malformed refresh token.
-- `401` — Invalid, expired, or revoked refresh token.
+- `401` — Invalid, expired, or blacklisted refresh token.
 
-### 3.4 Current User
+### 3.4 Verify Token
+
+**Endpoint:** `POST /api/v1/auth/token/verify/`
+
+**Authentication:** Public; the token to verify is supplied in the request body.
+
+**Purpose:** Validate a token's signature, expiration, and blacklist status.
+
+Request:
+
+```json
+{
+  "token": "<token>"
+}
+```
+
+Expected response:
+
+**200 OK**
+
+```json
+{}
+```
+
+A successful response confirms that the token passes these checks. This endpoint does not verify the token type or establish that the token is suitable for a particular authentication purpose.
+
+Possible errors:
+
+- `400` — Missing token or invalid request data.
+- `401` — Invalid, expired, or blacklisted token.
+
+### 3.5 Current User
 
 **Endpoint:** `GET /api/v1/auth/me/`
 
@@ -227,9 +253,10 @@ Expected response:
 
 ```json
 {
-  "id": "user-uuid",
-  "username": "example_user",
-  "email": "user@example.com"
+  "id": 1,
+  "email": "user@example.com",
+  "first_name": "Test",
+  "last_name": "User"
 }
 ```
 
@@ -480,9 +507,17 @@ Possible errors:
 
 **Endpoint:** `POST /api/v1/conversations/{conversation_id}/messages/`
 
-**Purpose:** Submit a user message and generate an assistant response using Gemini.
+**Purpose:** Submit a user message and generate an assistant response using the configured Gemini provider.
 
-Request:
+**Required header:**
+
+| Header            | Requirement | Description                                             |
+| ----------------- | ----------- | ------------------------------------------------------- |
+| `Idempotency-Key` | Required    | A valid UUID v4 identifying this generation submission. |
+
+The client must reuse the same `Idempotency-Key` and identical request content when retrying an in-progress or completed submission. A key must not be reused with different normalized content.
+
+**Request:**
 
 ```json
 {
@@ -490,11 +525,15 @@ Request:
 }
 ```
 
-The client submits only user content. The backend determines the message role, provider, model, and generation metadata.
+The client submits only user content. The backend determines the message role, provider, model, generation configuration, and generation metadata.
 
-Expected successful response:
+**Successful responses:**
 
-**201 Created**
+- **201 Created** — A new generation completed successfully.
+- **200 OK** — The same idempotent submission was already completed; return its existing successful response without creating additional records.
+- **202 Accepted** — The same submission is still being processed. The client must retry using the original key and identical content.
+
+The `201 Created` and `200 OK` responses use the following structure:
 
 ```json
 {
@@ -521,32 +560,73 @@ Expected successful response:
 
 The model identifier and usage metadata must come from the actual provider response or server configuration. They must not be fabricated.
 
-Possible errors:
+The `202 Accepted` response is:
 
-- `400` — Invalid or empty message.
-- `401` — Authentication required.
-- `404` — Conversation does not exist or is not accessible.
-- `429` — Application or provider rate limit reached.
-- `502` — Upstream AI provider failure.
-- `504` — Upstream generation timeout.
-- `500` — Unexpected internal failure.
+```json
+{
+  "status": "processing",
+  "message": "This request is still being processed. Retry the same request with the same Idempotency-Key."
+}
+```
 
-Important processing requirements:
+An in-progress replay must not create another user Message or ChatTurn.
+
+**Error responses:**
+
+All errors use the shared API error structure:
+
+```json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "The submitted message is invalid.",
+    "details": {}
+  }
+}
+```
+
+| HTTP status | Error code                    | Situation                                                           |
+| ----------- | ----------------------------- | ------------------------------------------------------------------- |
+| `400`       | `VALIDATION_ERROR`            | Invalid or empty message content.                                   |
+| `400`       | `IDEMPOTENCY_KEY_REQUIRED`    | The `Idempotency-Key` header is missing.                            |
+| `400`       | `IDEMPOTENCY_KEY_INVALID`     | The header is not a valid UUID v4.                                  |
+| `400`       | `CHAT_CONTEXT_LIMIT_EXCEEDED` | Mandatory context exceeds the configured input-token budget.        |
+| `401`       | `AUTHENTICATION_REQUIRED`     | Authentication is required.                                         |
+| `404`       | `RESOURCE_NOT_FOUND`          | The conversation does not exist or is not accessible to the user.   |
+| `409`       | `IDEMPOTENCY_KEY_REUSED`      | The same key was previously used with different normalized content. |
+| `429`       | `RATE_LIMIT_EXCEEDED`         | The application rate limit was reached.                             |
+| `502`       | `AI_PROVIDER_ERROR`           | The AI provider returned a failure or unusable response.            |
+| `503`       | `CHAT_CONTEXT_UNAVAILABLE`    | Required conversation context could not be obtained.                |
+| `504`       | `AI_PROVIDER_TIMEOUT`         | The AI provider request timed out.                                  |
+| `500`       | `INTERNAL_SERVER_ERROR`       | An unexpected internal failure occurred.                            |
+
+**Idempotency and failure semantics:**
+
+1. Every new generation submission requires a valid UUID v4 `Idempotency-Key`.
+2. A completed submission replayed with the same key and identical normalized content returns the original successful response with `200 OK`.
+3. An in-progress submission replayed with the same key and identical content returns `202 Accepted`; it does not create another Message or ChatTurn.
+4. Reusing a key with different normalized content returns `409 Conflict` with `IDEMPOTENCY_KEY_REUSED`.
+5. Preflight failures occur before Transaction A. They return an API error without creating a user Message or ChatTurn and without reserving the idempotency key. A subsequent valid submission may use that key.
+6. Preflight context failures map as follows:
+   - `CHAT_CONTEXT_LIMIT_EXCEEDED` → `400 Bad Request`.
+   - `CHAT_CONTEXT_UNAVAILABLE` → `503 Service Unavailable`.
+7. If generation or subsequent processing fails after Transaction A commits, the user Message is preserved and the existing ChatTurn is transitioned to `FAILED` using the documented failure-handling transaction.
+8. Replaying a failed submission returns the same mapped HTTP status as its recorded failure.
+
+**Important processing requirements:**
 
 1. Authenticate the user.
 2. Retrieve the conversation using an ownership-scoped query.
-3. Validate message content.
-4. Retrieve the appropriate conversation context.
-5. Apply conversation-specific custom instructions.
-6. Construct the Gemini request.
-7. Call the configured Gemini model.
-8. Validate and process the provider response.
-9. Persist the user and assistant messages according to the documented failure policy.
-10. Return the response to the client.
+3. Validate message content and the required idempotency key.
+4. Check existing idempotency state and prepare conversation context outside database transactions and row locks.
+5. Begin Transaction A: lock the conversation, recheck ownership and idempotency state, validate the prepared context snapshot, and persist the user Message and ChatTurn atomically.
+6. Call the configured Gemini model outside database transactions and row locks.
+7. Validate and process the provider response.
+8. Persist the assistant Message and complete the ChatTurn atomically in Transaction B.
+9. If a post-Transaction-A failure occurs, apply the documented failed-turn handling.
+10. Return the appropriate response to the client.
 
-Failure handling must not create a successful assistant message containing fabricated content.
-
-The exact persistence behavior when Gemini fails or the database write fails must be defined during backend implementation.
+The backend must not create a successful assistant message containing fabricated content. The client cannot choose the stored message role, provider credentials, or privileged generation settings.
 
 ---
 
@@ -632,17 +712,17 @@ Avoid putting the complete Gemini generation workflow inside a large API view. K
 
 The following decisions require validation before implementation:
 
-| Decision                      | Current direction            | Finalization point            |
-| ----------------------------- | ---------------------------- | ----------------------------- |
-| JWT implementation            | JWT-based authentication     | Backend setup                 |
-| Token storage                 | Not finalized                | Authentication implementation |
-| Pagination                    | DRF pagination               | API implementation            |
-| Maximum message length        | Not finalized                | Message validation            |
-| Custom instruction limit      | Not finalized                | Conversation validation       |
-| Message failure persistence   | Not finalized                | Message lifecycle design      |
-| Streaming responses           | Not in initial MVP           | Future enhancement            |
-| Message editing/regeneration  | Not in initial MVP           | Future enhancement            |
-| Conversation title generation | Initial manual/default title | Conversation implementation   |
+| Decision                      | Current direction                                                                                                                 | Finalization point               |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
+| JWT implementation            | JWT-based authentication                                                                                                          | Backend setup                    |
+| Token storage                 | Not finalized                                                                                                                     | Authentication implementation    |
+| Pagination                    | DRF pagination                                                                                                                    | API implementation               |
+| Maximum message length        | Not finalized                                                                                                                     | Message validation               |
+| Custom instruction limit      | Not finalized                                                                                                                     | Conversation validation          |
+| Message failure persistence   | Defined: preflight failures create no records; post-Transaction-A failures preserve the user Message and mark the ChatTurn FAILED | Backend implementation and tests |
+| Streaming responses           | Not in initial MVP                                                                                                                | Future enhancement               |
+| Message editing/regeneration  | Not in initial MVP                                                                                                                | Future enhancement               |
+| Conversation title generation | Initial manual/default title                                                                                                      | Conversation implementation      |
 
 ## 10. Scope Boundaries
 
