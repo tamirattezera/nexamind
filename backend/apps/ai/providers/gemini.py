@@ -20,6 +20,10 @@ class ProviderTimeoutError(ProviderError):
     """The provider request timed out."""
 
 
+class ProviderUnavailableError(ProviderError):
+    """The provider service is temporarily unavailable."""
+
+
 class ProviderResponseError(ProviderError):
     """The provider returned an unusable response."""
 
@@ -60,25 +64,17 @@ def normalize_gemini_response(
         types.FinishReason.STOP,
         types.FinishReason.MAX_TOKENS,
     ):
-        raise ProviderBlockedError(
-            "Gemini did not produce an acceptable response."
-        )
+        raise ProviderBlockedError("Gemini did not produce an acceptable response.")
 
     if not candidate.content or not candidate.content.parts:
-        raise ProviderResponseError(
-            "Gemini returned no candidate content."
-        )
+        raise ProviderResponseError("Gemini returned no candidate content.")
 
     visible_text = "".join(
-        part.text
-        for part in candidate.content.parts
-        if part.text and not part.thought
+        part.text for part in candidate.content.parts if part.text and not part.thought
     ).strip()
 
     if not visible_text:
-        raise ProviderResponseError(
-            "Gemini returned no user-visible text."
-        )
+        raise ProviderResponseError("Gemini returned no user-visible text.")
 
     usage = response.usage_metadata
 
@@ -90,9 +86,7 @@ def normalize_gemini_response(
         total_tokens=usage.total_token_count if usage else None,
         thinking_tokens=usage.thoughts_token_count if usage else None,
         finish_reason=(
-            candidate.finish_reason.value
-            if candidate.finish_reason
-            else None
+            candidate.finish_reason.value if candidate.finish_reason else None
         ),
         response_id=response.response_id,
     )
@@ -137,13 +131,15 @@ class GeminiProvider:
                 config=generation_config,
             )
         except httpx2.TimeoutException as exc:
-            raise ProviderTimeoutError(
-                "The Gemini request timed out."
-            ) from exc
-        except (httpx2.ConnectError, errors.APIError) as exc:
-            raise ProviderError(
-                "The Gemini provider request failed."
-            ) from exc
+            raise ProviderTimeoutError("The Gemini request timed out.") from exc
+        except httpx2.ConnectError as exc:
+            raise ProviderError("The Gemini provider request failed.") from exc
+        except errors.APIError as exc:
+            if exc.code == 503:
+                raise ProviderUnavailableError(
+                    "The Gemini provider service is unavailable."
+                ) from exc
+            raise ProviderError("The Gemini provider request failed.") from exc
 
         return normalize_gemini_response(
             response,
@@ -170,15 +166,17 @@ class GeminiProvider:
             raise ProviderTimeoutError(
                 "The Gemini token-count request timed out."
             ) from exc
-        except (httpx2.ConnectError, errors.APIError) as exc:
-            raise ProviderError(
-                "The Gemini token-count request failed."
-            ) from exc
+        except httpx2.ConnectError as exc:
+            raise ProviderError("The Gemini token-count request failed.") from exc
+        except errors.APIError as exc:
+            if exc.code == 503:
+                raise ProviderUnavailableError(
+                    "The Gemini token-count service is unavailable."
+                ) from exc
+            raise ProviderError("The Gemini token-count request failed.") from exc
 
         if response.total_tokens is None or response.total_tokens < 0:
-            raise ProviderResponseError(
-                "Gemini returned an invalid token count."
-            )
+            raise ProviderResponseError("Gemini returned an invalid token count.")
 
         return TokenCountResult(
             total_tokens=response.total_tokens,

@@ -17,6 +17,7 @@ from apps.ai.providers.gemini import (
     ProviderError,
     ProviderResponseError,
     ProviderTimeoutError,
+    ProviderUnavailableError,
     build_gemini_contents,
     normalize_gemini_response,
 )
@@ -248,6 +249,16 @@ class GeminiProviderTests(SimpleTestCase):
         with self.assertRaises(ProviderError):
             self.provider.generate(self.request)
 
+
+    def test_translates_gemini_service_unavailable(self):
+        self.client.models.generate_content.side_effect = errors.APIError(
+            503,
+            {"message": "service unavailable"},
+        )
+
+        with self.assertRaises(ProviderUnavailableError):
+            self.provider.generate(self.request)
+
     def test_counts_tokens_with_system_instruction_and_mapped_messages(self):
         self.client.models.count_tokens.return_value = Mock(total_tokens=42)
 
@@ -320,6 +331,23 @@ class GeminiProviderTests(SimpleTestCase):
         )
 
         with self.assertRaises(ProviderError):
+            self.provider.count_tokens(request)
+
+
+    def test_translates_token_count_service_unavailable(self):
+        self.client.models.count_tokens.side_effect = errors.APIError(
+            503,
+            {"message": "service unavailable"},
+        )
+
+        request = TokenCountRequest(
+            messages=(
+                ConversationMessage(role="user", content="Hello"),
+            ),
+            system_instruction="You are NexaMind.",
+        )
+
+        with self.assertRaises(ProviderUnavailableError):
             self.provider.count_tokens(request)
 
     def test_rejects_missing_token_count(self):
