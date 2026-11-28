@@ -832,7 +832,8 @@ The following ChatTurn indexes are implemented in the Django model and migration
 | Idempotency unique index             | `conversation_id, idempotency_key`               | Prevent duplicate submissions and support idempotency lookup.   |
 | Active-turn conditional unique index | `conversation_id` where `status = 'IN_PROGRESS'` | Enforce at most one active ChatTurn per Conversation.           |
 | Conversation history index           | `conversation_id, created_at`                    | Retrieve a Conversation's ChatTurns chronologically.            |
-| Recovery index                       | `status, started_at`                             | Locate stale in-progress ChatTurns efficiently.                 |
+| Unclaimed recovery index              | `status, started_at`                             | Locate stale unclaimed ChatTurns efficiently.                    |
+| Claimed recovery index                | `status, execution_claimed_at`                   | Locate stale claimed ChatTurns efficiently.                      |
 | User Message unique index            | `user_message_id`                                | Enforce the one-to-one user Message relationship.               |
 | Assistant Message unique index       | `assistant_message_id`                           | Enforce the optional one-to-one assistant Message relationship. |
 
@@ -2112,11 +2113,9 @@ If completion wins first, a subsequent Conversation deletion removes the Convers
 
 ### 17.8 Stale ChatTurn Recovery
 
-A process may terminate after Transaction A commits but before the ChatTurn reaches a terminal state.
+A process may terminate after Transaction A commits or while a generation is executing. This can leave a ChatTurn in `IN_PROGRESS` even though no active worker can complete it.
 
-This can leave a ChatTurn in `IN_PROGRESS` even though no active generation process remains.
-
-The MVP therefore requires a recovery mechanism.
+The MVP requires stale-turn recovery and a persistent execution claim that prevents competing workers from calling Gemini for the same ChatTurn.
 
 The approved recovery configuration is:
 
@@ -2128,38 +2127,47 @@ The approved recovery configuration is:
 | Recovery mechanism     | Django management command     |
 | Automatic Gemini retry | Disabled                      |
 
-The recovery command will be:
+The recovery command is `python manage.py recover_stale_turns`. It supports an optional `--batch-size` argument, defaulting to 100.
 
-```bash
-python manage.py recover_stale_turns
-```
+#### Execution claim and fencing
 
-The command must identify stale `IN_PROGRESS` ChatTurns and transition eligible records to `FAILED`.
+Each ChatTurn has two nullable execution-claim fields:
 
-The failure record must include:
+- `execution_claim_id`: a UUID fencing token identifying the worker that acquired the claim.
+- `execution_claimed_at`: the timestamp at which that claim was acquired.
 
-```text
-error_code = CHAT_TURN_PROCESSING_TIMEOUT
-```
+Both fields must be set together or both be null. The database enforces this invariant through `chatturn_execution_claim_pair_valid`.
 
-It must also set `completed_at` and preserve the original user Message.
+Before calling Gemini, a worker must acquire a claim in a short transaction. It locks the Conversation first and the ChatTurn second, verifies that the turn belongs to the Conversation, remains `IN_PROGRESS`, and has no existing claim, then assigns a new UUID and timestamp. The transaction commits before provider execution begins.
 
-Recovery and normal completion must coordinate through database row locking and a status check. Only an `IN_PROGRESS` ChatTurn may transition to a terminal state.
+A competing worker that finds an existing claim must not call Gemini. The Gemini request executes outside database transactions and row locks.
 
-If recovery wins the race, a late Gemini response must not overwrite the failed state or create an assistant Message.
+A worker may persist a provider result only while the ChatTurn remains `IN_PROGRESS` and its stored `execution_claim_id` matches that worker's fencing token.
 
-The stale threshold must remain greater than the maximum expected generation-processing duration. The implementation must also account for the provider timeout and processing overhead so that active requests are not incorrectly classified as stale.
+Success persistence creates the assistant Message and transitions the ChatTurn to `COMPLETED` atomically. Failure persistence transitions it to `FAILED`. Both terminal transitions clear `execution_claim_id` and `execution_claimed_at`.
 
-The MVP does not automatically retry stale or failed generations. A retry requires a new user submission with a new idempotency key.
+The claim provides database-level concurrency and stale-worker protection. It does not guarantee exactly-once execution across PostgreSQL and the external Gemini service. Uncertain provider outcomes must not trigger an automatic provider retry.
 
-The recovery command must acquire locks in the same consistent order used by generation completion and failure handling:
+#### Stale eligibility and recovery
 
-1. Lock the Conversation.
-2. Lock the ChatTurn.
-3. Verify that the ChatTurn belongs to the locked Conversation, remains in the `IN_PROGRESS` state, and still satisfies the stale threshold after both locks have been acquired.
-4. Transition the ChatTurn to `FAILED` within the transaction.
+Recovery considers only `IN_PROGRESS` ChatTurns. Eligibility is based on the age of the current execution phase:
 
-If the Conversation or ChatTurn no longer exists, the recovery command must skip the deleted generation operation.
+- An unclaimed ChatTurn is eligible when `started_at` is at least 120 seconds old.
+- A claimed ChatTurn is eligible when `execution_claimed_at` is at least 120 seconds old.
+
+A recently claimed ChatTurn must not be considered stale merely because its original `started_at` timestamp is old. Using the claim timestamp gives a worker that acquires its claim late the full stale-processing interval.
+
+For each candidate, recovery locks the Conversation first and the ChatTurn second. It verifies ownership and `IN_PROGRESS` status, then rechecks the applicable stale timestamp after both locks have been acquired.
+
+If the turn is still stale, recovery transitions it to `FAILED` within the transaction, sets `completed_at`, records `CHAT_TURN_PROCESSING_TIMEOUT`, and clears both execution-claim fields.
+
+The original user Message is preserved. Recovery must not create an assistant Message or automatically retry Gemini. A retry requires a new user submission with a new idempotency key.
+
+Normal completion, failure persistence, and recovery use the same Conversation-then-ChatTurn lock order and status checks.
+
+If recovery wins, a late Gemini response cannot overwrite the failed state: the turn is no longer `IN_PROGRESS` and its fencing token no longer matches. The late response must not create an assistant Message.
+
+If the Conversation or ChatTurn no longer exists, recovery skips the deleted generation operation. Recovery queries are supported by the ChatTurn indexes on `(status, started_at)` and `(status, execution_claimed_at)`.
 
 ### 17.9 Transaction and Persistence Principles
 
