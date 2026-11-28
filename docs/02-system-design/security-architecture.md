@@ -159,7 +159,7 @@ Authentication establishes who is making a request.
 
 NexaMind will support user registration and login using Django REST Framework and a JWT-based authentication approach.
 
-The final token implementation will be selected during backend development.
+The backend currently issues JWT access and refresh tokens using SimpleJWT. The approved initial browser strategy and token lifecycle are documented in Sections 5.4 and 5.5.
 
 ### 5.1 Registration
 
@@ -224,51 +224,39 @@ Authenticated User
 
 ### 5.4 Access and refresh tokens
 
-A typical JWT architecture uses two token types.
+NexaMind currently uses Django SimpleJWT with the following configuration:
 
-| Token         | Purpose                                       |
-| ------------- | --------------------------------------------- |
-| Access token  | Authorizes API requests for a limited period. |
-| Refresh token | Obtains a new access token when permitted.    |
+| Setting | Current value |
+| --- | --- |
+| Access-token lifetime | 15 minutes |
+| Refresh-token lifetime | 7 days |
+| Refresh-token rotation | Enabled |
+| Blacklist after rotation | Enabled |
 
-The exact expiration periods, refresh behavior, rotation, and revocation strategy must be selected during authentication implementation.
+The access token authorizes protected API requests for a limited period. The refresh token obtains a replacement access token when the refresh token is still valid and accepted by the backend.
 
-A JWT does not automatically provide secure logout or immediate revocation.
+When rotation succeeds, the backend returns a replacement refresh token. The client must store and use the latest refresh token; the previously submitted token is blacklisted.
 
-The chosen implementation must account for those limitations.
+A JWT does not automatically provide secure logout or immediate access-token revocation. Refresh-token blacklisting does not invalidate an access token that has already been issued.
 
-### 5.5 Token storage
+### 5.5 Approved initial token storage
 
-Token storage is an important unresolved design decision.
+The initial React frontend strategy is:
 
-Potential approaches:
+| Token | Browser storage |
+| --- | --- |
+| Access token | JavaScript memory only |
+| Refresh token | `sessionStorage` |
 
-**HttpOnly secure cookies**
+The access token must not be persisted in browser storage. The refresh token is stored in `sessionStorage` so a page reload within the tab can attempt session restoration.
 
-Advantages:
+The refresh token remains accessible to JavaScript. An XSS vulnerability could expose it and compromise the user's session. This strategy is a deliberate initial implementation choice, not equivalent to HttpOnly-cookie protection.
 
-- JavaScript cannot directly read an HttpOnly cookie.
-- Reduces exposure of tokens through certain XSS attacks.
+The frontend must use a centralized API client to attach access tokens, coordinate concurrent refresh attempts through one shared operation, update the rotated refresh token, retry eligible failed requests at most once, and clear local authentication state when refresh fails.
 
-Considerations:
+The current backend does not provide a logout or access-token revocation endpoint. Frontend logout clears local tokens and authentication state; it does not revoke an already-issued access token. Such an access token may remain valid until its 15-minute expiration.
 
-- Requires appropriate CSRF protection.
-- Cookie attributes and cross-origin configuration must be correct.
-
-**Browser storage**
-
-Advantages:
-
-- Straightforward integration with JavaScript-based API clients.
-
-Considerations:
-
-- Tokens accessible to JavaScript can be exposed if an XSS vulnerability exists.
-- Secure lifecycle and expiration handling are important.
-
-The final strategy must consider the deployment architecture, browser security, CSRF, and frontend/backend domain configuration.
-
-Do not assume that storing a JWT in localStorage is automatically secure.
+HttpOnly-cookie authentication remains a possible future alternative. It would require backend cookie handling, CSRF protection, and coordinated CORS and cookie configuration.
 
 ## 6. Authorization Architecture
 
@@ -980,19 +968,19 @@ Security controls should be introduced alongside the functionality they protect.
 
 ## 20. Open Security Decisions
 
-| ID        | Question                                                                    | When to resolve               |
-| --------- | --------------------------------------------------------------------------- | ----------------------------- |
-| SEC-OD-01 | Will authentication use HttpOnly cookies or another token-storage approach? | Authentication implementation |
-| SEC-OD-02 | What access and refresh token lifetimes will be used?                       | Authentication implementation |
-| SEC-OD-03 | What token rotation and revocation strategy is required?                    | Authentication implementation |
-| SEC-OD-04 | What password-validation policy will be used?                               | Account implementation        |
-| SEC-OD-05 | Which frontend origins are permitted in production?                         | Deployment                    |
-| SEC-OD-06 | What rate limits should apply to authentication and AI generation?          | API implementation            |
-| SEC-OD-07 | What conversation retention and deletion policy will apply?                 | Product and security policy   |
-| SEC-OD-08 | What provider data-handling terms apply to the selected Gemini API service? | Before production release     |
-| SEC-OD-09 | What logging and monitoring infrastructure will be used?                    | Deployment                    |
-| SEC-OD-10 | What backup and recovery objectives are required?                           | Deployment                    |
-| SEC-OD-11 | What security scanning tools will be integrated into development?           | Engineering setup             |
+| ID        | Decision or open question | Status |
+| --------- | ------------------------- | ------ |
+| SEC-OD-01 | Initial browser token storage: access token in memory and refresh token in `sessionStorage`; HttpOnly cookies remain a possible future alternative. | Resolved for initial frontend |
+| SEC-OD-02 | Access-token lifetime is 15 minutes; refresh-token lifetime is 7 days. | Resolved in backend configuration |
+| SEC-OD-03 | Refresh rotation and blacklist-after-rotation are enabled. No backend logout or immediate access-token revocation endpoint currently exists. | Current implementation documented |
+| SEC-OD-04 | What password-validation policy will be used? | Account implementation |
+| SEC-OD-05 | Which frontend origins are permitted in production? | Deployment |
+| SEC-OD-06 | What rate limits should apply to authentication and AI generation? | API implementation |
+| SEC-OD-07 | What conversation retention and deletion policy will apply? | Product and security policy |
+| SEC-OD-08 | What provider data-handling terms apply to the selected Gemini API service? | Before production release |
+| SEC-OD-09 | What logging and monitoring infrastructure will be used? | Deployment |
+| SEC-OD-10 | What backup and recovery objectives are required? | Deployment |
+| SEC-OD-11 | What security scanning tools will be integrated into development? | Engineering setup |
 
 These decisions must be resolved using the actual implementation and deployment requirements.
 
@@ -1000,7 +988,7 @@ These decisions must be resolved using the actual implementation and deployment 
 
 - [ ] Authentication responsibilities are documented.
 - [ ] JWT architecture is defined conceptually.
-- [ ] Token storage trade-offs are documented.
+- [x] Token storage trade-offs and the approved initial strategy are documented.
 - [ ] Authorization rules are documented.
 - [ ] Conversation ownership enforcement is required.
 - [ ] API security requirements are documented.

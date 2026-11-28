@@ -549,22 +549,80 @@ The backend remains responsible for:
 - Rejecting unauthorized operations.
 - Protecting sensitive information.
 
-### 12.3 Token Storage Decision
+### 12.3 Approved JWT Storage Strategy
 
-The exact JWT storage strategy is intentionally unresolved.
+The initial frontend implementation uses browser-managed JWT storage:
 
-Options such as secure HttpOnly cookies and browser-managed token storage have different security and implementation trade-offs.
+| Token | Storage | Lifetime |
+| --- | --- | --- |
+| Access token | JavaScript memory only | 15 minutes |
+| Refresh token | `sessionStorage` | 7 days |
 
-This decision must consider:
+These lifetimes match the current backend SimpleJWT configuration.
 
-- Cross-site scripting risks.
-- Cross-site request forgery risks.
-- Cookie configuration.
-- CORS configuration.
-- Refresh-token lifecycle.
-- Logout and token revocation.
+The frontend must follow these rules:
 
-It must be documented before authentication implementation.
+1. Keep the access token in application memory. Do not persist it in `localStorage`, `sessionStorage`, IndexedDB, or cookies.
+2. Store the current refresh token in `sessionStorage` under one documented application key.
+3. Send access tokens only through the `Authorization: Bearer <access-token>` header on protected API requests.
+4. Send the refresh token only to the backend refresh endpoint.
+5. When a page reload clears the in-memory access token, attempt session restoration using the refresh token in `sessionStorage`.
+6. When refresh succeeds, replace the stored refresh token with the newly rotated refresh token and keep the returned access token in memory.
+7. Do not assume a refresh token remains valid after it has been rotated. Always use the latest returned refresh token.
+
+### 12.4 Access-Token Refresh Coordination
+
+The centralized Axios client owns token attachment and refresh coordination.
+
+During application startup, authentication must begin in an explicit initializing state:
+
+1. If a refresh token exists in `sessionStorage`, attempt session restoration before protected route decisions or protected API requests proceed.
+2. After a successful refresh, retrieve the current user from the authenticated `/auth/me/` endpoint before marking the session authenticated.
+3. If no refresh token exists, or refresh or user retrieval fails, clear local authentication state and finish initialization as unauthenticated.
+4. Route guards must wait for initialization to finish rather than briefly rendering protected content or redirecting prematurely.
+
+After initialization, apply the following request lifecycle:
+
+1. Attach the current in-memory access token to protected requests.
+2. When an eligible protected request receives `401`, initiate a refresh if one is not already running.
+3. Concurrent requests must await the same in-flight refresh operation. Do not send multiple refresh requests using the same rotating refresh token.
+4. After a successful refresh, update both token locations and retry each eligible original request at most once.
+5. Mark retried requests so a second `401` cannot start an infinite refresh loop.
+6. Do not invoke refresh recursively for login, registration, or refresh requests.
+7. If refresh fails, clear the refresh token from `sessionStorage`, clear the in-memory access token, and transition authentication state to unauthenticated.
+8. Do not automatically replay a request after refresh failure.
+
+### 12.5 Logout and Revocation Semantics
+
+The current backend does not expose a logout or access-token revocation endpoint.
+
+Local logout therefore means:
+
+- Clear the in-memory access token.
+- Remove the refresh token from `sessionStorage`.
+- Clear the authenticated user and other local authentication state.
+- Navigate to the unauthenticated application experience.
+
+This does not revoke an access token already issued by the backend. Such a token may remain valid until its 15-minute expiration. Refresh-token rotation and blacklisting do not provide immediate revocation of already-issued access tokens.
+
+Do not describe local logout as server-side token revocation.
+
+### 12.6 Browser Security Limitations
+
+The refresh token in `sessionStorage` is accessible to JavaScript executing in the application's origin. An XSS vulnerability could expose it and compromise the user's session.
+
+Required precautions:
+
+- Prefer React's normal escaped rendering.
+- Avoid unsafe HTML injection and sanitize untrusted rich content if introduced.
+- Never log or expose access or refresh tokens.
+- Never place tokens in URLs or application error messages.
+- Use HTTPS in deployed environments.
+- Keep dependencies updated and review security-sensitive changes.
+
+`sessionStorage` is scoped to a browser tab's session, but it is not an HttpOnly security boundary.
+
+HttpOnly-cookie authentication remains a possible future architecture. It would require coordinated backend cookie handling, CSRF protection, and deployment-specific CORS and cookie configuration.
 
 ## 13. Asynchronous UI Behavior
 
@@ -743,14 +801,13 @@ The following decisions remain for later implementation phases:
 
 1. Exact CSS and Tailwind configuration.
 2. Final route definitions and route-guard implementation.
-3. JWT storage and refresh strategy.
-4. Authentication context design.
-5. Whether server-state caching requires a dedicated library.
-6. Message pagination and incremental loading.
-7. Chat scrolling behavior.
-8. Mobile sidebar interaction.
-9. Notification and toast implementation.
-10. Frontend test and end-to-end tool configuration.
+3. Authentication context design.
+4. Whether server-state caching requires a dedicated library.
+5. Message pagination and incremental loading.
+6. Chat scrolling behavior.
+7. Mobile sidebar interaction.
+8. Notification and toast implementation.
+9. Frontend test and end-to-end tool configuration.
 
 These decisions should be resolved when their implementation requirements become clear.
 
@@ -764,7 +821,7 @@ Before frontend implementation, verify:
 - [ ] Routing responsibilities are defined.
 - [ ] Axios communication is centralized.
 - [ ] Backend-owned data is distinguished from temporary UI state.
-- [ ] Authentication storage remains an explicit security decision.
+- [x] Initial JWT storage and refresh strategy are documented.
 - [ ] Backend authorization is not delegated to React.
 - [ ] Loading, error, and empty states are included in the design.
 - [ ] Responsive behavior is considered.
