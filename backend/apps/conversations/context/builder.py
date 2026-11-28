@@ -1,4 +1,5 @@
 from apps.ai.contracts import ConversationMessage, TokenCountRequest
+from apps.ai.providers.gemini import ProviderError
 from apps.ai.services import count_tokens
 from apps.conversations.instructions.platform import (
     PLATFORM_INSTRUCTION_VERSION,
@@ -8,18 +9,10 @@ from apps.conversations.models import Conversation, Message
 
 from .config import get_conversation_context_config
 from .contracts import PreparedConversationContext
-from .exceptions import ContextLimitExceeded
+from .exceptions import ContextLimitExceeded, ContextUnavailable
 from .history import get_eligible_history_messages
-
-
-def _build_system_instruction(
-    platform_instruction: str,
-    custom_instruction: str | None,
-) -> str:
-    if custom_instruction is None:
-        return platform_instruction
-
-    return f"{platform_instruction}\n\n{custom_instruction}"
+from .instructions import build_system_instruction, normalize_custom_instruction
+from apps.ai.config import GeminiConfig
 
 
 def _to_conversation_message(message: Message) -> ConversationMessage:
@@ -32,13 +25,19 @@ def _to_conversation_message(message: Message) -> ConversationMessage:
 def _count_input_tokens(
     messages: tuple[ConversationMessage, ...],
     system_instruction: str,
+    *,
+    generation_config: GeminiConfig,
 ) -> int:
-    result = count_tokens(
-        TokenCountRequest(
-            messages=messages,
-            system_instruction=system_instruction,
-        )
+    request = TokenCountRequest(
+        messages=messages,
+        system_instruction=system_instruction,
     )
+
+    try:
+        result = count_tokens(request, config=generation_config)
+    except ProviderError as exc:
+        raise ContextUnavailable() from exc
+
     return result.total_tokens
 
 
@@ -46,6 +45,7 @@ def prepare_conversation_context(
     *,
     conversation: Conversation,
     current_user_message: Message,
+    generation_config: GeminiConfig,
 ) -> PreparedConversationContext:
     """
     Prepare immutable, token-bounded context without writing to the database.
@@ -64,12 +64,9 @@ def prepare_conversation_context(
     config = get_conversation_context_config()
 
     platform_instruction = PLATFORM_SYSTEM_INSTRUCTION
-    custom_instruction = conversation.custom_instructions
+    custom_instruction = normalize_custom_instruction(conversation.custom_instructions)
 
-    if custom_instruction is not None and not custom_instruction.strip():
-        custom_instruction = None
-
-    system_instruction = _build_system_instruction(
+    system_instruction = build_system_instruction(
         platform_instruction,
         custom_instruction,
     )
@@ -85,8 +82,7 @@ def prepare_conversation_context(
         )
 
     exchanges = tuple(
-        (history[index], history[index + 1])
-        for index in range(0, len(history), 2)
+        (history[index], history[index + 1]) for index in range(0, len(history), 2)
     )
 
     current_message = _to_conversation_message(current_user_message)
@@ -106,6 +102,7 @@ def prepare_conversation_context(
     input_tokens = _count_input_tokens(
         all_messages,
         system_instruction,
+        generation_config=generation_config,
     )
 
     if input_tokens <= config.max_input_tokens:
@@ -117,6 +114,7 @@ def prepare_conversation_context(
         mandatory_tokens = _count_input_tokens(
             mandatory_messages,
             system_instruction,
+            generation_config=generation_config,
         )
 
         if mandatory_tokens > config.max_input_tokens:
@@ -137,6 +135,7 @@ def prepare_conversation_context(
             candidate_tokens = _count_input_tokens(
                 candidate_messages,
                 system_instruction,
+                generation_config=generation_config,
             )
 
             if candidate_tokens <= config.max_input_tokens:
@@ -147,9 +146,7 @@ def prepare_conversation_context(
                 high = middle
 
     selected_history = tuple(
-        message
-        for exchange in selected_exchanges
-        for message in exchange
+        message for exchange in selected_exchanges for message in exchange
     )
 
     return PreparedConversationContext(
@@ -159,9 +156,8 @@ def prepare_conversation_context(
         platform_instruction_version=PLATFORM_INSTRUCTION_VERSION,
         platform_instruction_snapshot=platform_instruction,
         custom_instruction_snapshot=custom_instruction,
-        selected_history_message_ids=tuple(
-            message.id for message in selected_history
-        ),
+        eligible_history_message_ids=tuple(message.id for message in history),
+        selected_history_message_ids=tuple(message.id for message in selected_history),
         input_tokens=input_tokens,
         max_input_tokens=config.max_input_tokens,
     )

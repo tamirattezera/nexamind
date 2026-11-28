@@ -12,6 +12,11 @@ class PreparedConversationContextTests(SimpleTestCase):
     def setUp(self):
         self.current_message_id = uuid.uuid4()
         self.history_ids = (uuid.uuid4(), uuid.uuid4())
+        self.eligible_history_ids = (
+            *self.history_ids,
+            uuid.uuid4(),
+            uuid.uuid4(),
+        )
 
         self.prepared = PreparedConversationContext(
             current_message_id=self.current_message_id,
@@ -33,6 +38,7 @@ class PreparedConversationContextTests(SimpleTestCase):
             platform_instruction_version="v1",
             platform_instruction_snapshot="Platform instruction",
             custom_instruction_snapshot="Custom instruction",
+            eligible_history_message_ids=self.eligible_history_ids,
             selected_history_message_ids=self.history_ids,
             input_tokens=1200,
             max_input_tokens=32768,
@@ -64,14 +70,26 @@ class PreparedConversationContextTests(SimpleTestCase):
             "Custom instruction",
         )
 
-    def test_stores_history_ids_as_an_ordered_tuple(self):
+    def test_stores_eligible_and_selected_history_ids_separately(self):
+        self.assertEqual(
+            self.prepared.eligible_history_message_ids,
+            self.eligible_history_ids,
+        )
         self.assertEqual(
             self.prepared.selected_history_message_ids,
             self.history_ids,
         )
         self.assertIsInstance(
+            self.prepared.eligible_history_message_ids,
+            tuple,
+        )
+        self.assertIsInstance(
             self.prepared.selected_history_message_ids,
             tuple,
+        )
+        self.assertGreater(
+            len(self.prepared.eligible_history_message_ids),
+            len(self.prepared.selected_history_message_ids),
         )
 
     def test_stores_token_count_and_budget(self):

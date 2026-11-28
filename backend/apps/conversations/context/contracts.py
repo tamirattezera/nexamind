@@ -12,6 +12,7 @@ class PreparedConversationContext:
     platform_instruction_version: str
     platform_instruction_snapshot: str
     custom_instruction_snapshot: str | None
+    eligible_history_message_ids: tuple[UUID, ...]
     selected_history_message_ids: tuple[UUID, ...]
     input_tokens: int
     max_input_tokens: int

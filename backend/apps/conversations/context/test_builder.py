@@ -9,14 +9,16 @@ from django.utils import timezone
 from django.test.utils import CaptureQueriesContext
 
 from apps.ai.contracts import TokenCountResult
+from apps.ai.providers.gemini import ProviderTimeoutError
 from apps.conversations.models import ChatTurn, Conversation, Message
 
 from .builder import prepare_conversation_context
-from .exceptions import ContextLimitExceeded
+from .exceptions import ContextLimitExceeded, ContextUnavailable
 from ..instructions.platform import (
     PLATFORM_INSTRUCTION_VERSION,
     PLATFORM_SYSTEM_INSTRUCTION,
 )
+from apps.ai.config import GeminiConfig
 
 User = get_user_model()
 
@@ -38,6 +40,15 @@ class PrepareConversationContextTests(TestCase):
             role=Message.Role.USER,
             content="Current question",
         )
+
+        self.generation_config = GeminiConfig(
+            api_key="test-api-key",
+            model="gemini-3.8-flash",
+            thinking_level="LOW",
+            max_output_tokens=8192,
+            timeout_ms=60000,
+        )
+
 
     def create_completed_turn(self, content):
         user_message = Message.objects.create(
@@ -72,6 +83,7 @@ class PrepareConversationContextTests(TestCase):
         prepared = prepare_conversation_context(
             conversation=self.conversation,
             current_user_message=self.current_message,
+            generation_config=self.generation_config,
         )
 
         self.assertTrue(self.current_message._state.adding)
@@ -94,6 +106,7 @@ class PrepareConversationContextTests(TestCase):
             prepare_conversation_context(
                 conversation=self.conversation,
                 current_user_message=invalid_message,
+                generation_config=self.generation_config,
             )
 
     def test_rejects_message_from_another_conversation(self):
@@ -111,6 +124,7 @@ class PrepareConversationContextTests(TestCase):
             prepare_conversation_context(
                 conversation=self.conversation,
                 current_user_message=invalid_message,
+                generation_config=self.generation_config,
             )
 
     @patch("apps.conversations.context.builder.count_tokens")
@@ -122,6 +136,7 @@ class PrepareConversationContextTests(TestCase):
         prepared = prepare_conversation_context(
             conversation=self.conversation,
             current_user_message=self.current_message,
+            generation_config=self.generation_config,
         )
 
         self.assertEqual(
@@ -150,6 +165,7 @@ class PrepareConversationContextTests(TestCase):
         prepared = prepare_conversation_context(
             conversation=self.conversation,
             current_user_message=self.current_message,
+            generation_config=self.generation_config,
         )
 
         self.assertIsNone(prepared.custom_instruction_snapshot)
@@ -170,6 +186,7 @@ class PrepareConversationContextTests(TestCase):
         prepared = prepare_conversation_context(
             conversation=self.conversation,
             current_user_message=self.current_message,
+            generation_config=self.generation_config,
         )
 
         self.assertEqual(
@@ -197,13 +214,14 @@ class PrepareConversationContextTests(TestCase):
         second = self.create_completed_turn("second exchange")
         third = self.create_completed_turn("third exchange")
 
-        count_tokens.side_effect = lambda request: TokenCountResult(
+        count_tokens.side_effect = lambda request, *, config: TokenCountResult(
             total_tokens=len(request.messages)
         )
 
         prepared = prepare_conversation_context(
             conversation=self.conversation,
             current_user_message=self.current_message,
+            generation_config=self.generation_config,
         )
 
         self.assertEqual(
@@ -232,10 +250,7 @@ class PrepareConversationContextTests(TestCase):
         # the newest one-exchange suffix, and the larger suffix
         # that exceeds the budget.
         self.assertEqual(
-            [
-                len(call.args[0].messages)
-                for call in count_tokens.call_args_list
-            ],
+            [len(call.args[0].messages) for call in count_tokens.call_args_list],
             [7, 1, 3, 5],
         )
 
@@ -248,17 +263,41 @@ class PrepareConversationContextTests(TestCase):
             prepare_conversation_context(
                 conversation=self.conversation,
                 current_user_message=self.current_message,
+                generation_config=self.generation_config,
             )
 
     @patch("apps.conversations.context.builder.count_tokens")
-    def test_propagates_token_counting_failure(self, count_tokens):
-        error = RuntimeError("Token counting failed")
+    def test_translates_provider_failure_to_context_unavailable(
+        self,
+        count_tokens,
+    ):
+        error = ProviderTimeoutError("The provider timed out.")
+        count_tokens.side_effect = error
+
+        with self.assertRaises(ContextUnavailable) as context:
+            prepare_conversation_context(
+                conversation=self.conversation,
+                current_user_message=self.current_message,
+                generation_config=self.generation_config,
+            )
+
+        self.assertEqual(
+            context.exception.error_code,
+            "CHAT_CONTEXT_UNAVAILABLE",
+        )
+        self.assertIs(context.exception.__cause__, error)
+        self.assertNotIn("provider timed out", str(context.exception))
+
+    @patch("apps.conversations.context.builder.count_tokens")
+    def test_propagates_unexpected_token_counting_failure(self, count_tokens):
+        error = RuntimeError("Unexpected token counting failure")
         count_tokens.side_effect = error
 
         with self.assertRaises(RuntimeError) as context:
             prepare_conversation_context(
                 conversation=self.conversation,
                 current_user_message=self.current_message,
+                generation_config=self.generation_config,
             )
 
         self.assertIs(context.exception, error)
@@ -275,6 +314,7 @@ class PrepareConversationContextTests(TestCase):
             prepared = prepare_conversation_context(
                 conversation=self.conversation,
                 current_user_message=self.current_message,
+                generation_config=self.generation_config,
             )
 
         write_statements = [
@@ -289,3 +329,37 @@ class PrepareConversationContextTests(TestCase):
         self.assertEqual(write_statements, [])
         self.assertEqual(len(prepared.selected_history_message_ids), 2)
         self.assertTrue(self.current_message._state.adding)
+
+
+    @patch("apps.conversations.context.builder.count_tokens")
+    def test_reuses_explicit_generation_config_for_every_token_count(
+        self,
+        count_tokens,
+    ):
+        generation_config = GeminiConfig(
+            api_key="test-api-key",
+            model="gemini-3.8-flash",
+            thinking_level="LOW",
+            max_output_tokens=8192,
+            timeout_ms=60000,
+        )
+
+        count_tokens.side_effect = [
+            TokenCountResult(total_tokens=40000),
+            TokenCountResult(total_tokens=10),
+        ]
+
+        prepared = prepare_conversation_context(
+            conversation=self.conversation,
+            current_user_message=self.current_message,
+            generation_config=generation_config,
+        )
+
+        self.assertEqual(prepared.input_tokens, 10)
+        self.assertEqual(count_tokens.call_count, 2)
+
+        for call in count_tokens.call_args_list:
+            self.assertIs(
+                call.kwargs["config"],
+                generation_config,
+            )

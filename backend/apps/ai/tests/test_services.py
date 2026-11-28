@@ -12,6 +12,7 @@ from apps.ai.services import generate_response
 
 from apps.ai.contracts import TokenCountRequest, TokenCountResult
 from apps.ai.services import count_tokens
+from apps.ai.config import GeminiConfig
 
 
 class GenerateResponseServiceTests(SimpleTestCase):
@@ -45,6 +46,27 @@ class GenerateResponseServiceTests(SimpleTestCase):
         self.assertEqual(result, self.result)
 
     @patch("apps.ai.services.GeminiProvider")
+    def test_uses_explicit_generation_configuration(self, provider_class):
+        config = GeminiConfig(
+            api_key="test-api-key",
+            model="gemini-test-model",
+            thinking_level="HIGH",
+            max_output_tokens=4096,
+            timeout_ms=30000,
+        )
+
+        provider = provider_class.return_value
+        provider.generate.return_value = self.result
+
+        result = generate_response(self.request, config=config)
+
+        provider_class.assert_called_once_with(config=config)
+        provider.generate.assert_called_once_with(self.request)
+        provider.close.assert_called_once_with()
+        self.assertEqual(result, self.result)
+
+
+    @patch("apps.ai.services.GeminiProvider")
     def test_closes_provider_when_generation_fails(self, provider_class):
         provider = provider_class.return_value
         provider.generate.side_effect = ProviderTimeoutError(
@@ -72,9 +94,7 @@ class GenerateResponseServiceTests(SimpleTestCase):
 class CountTokensServiceTests(SimpleTestCase):
     def setUp(self):
         self.request = TokenCountRequest(
-            messages=(
-                ConversationMessage(role="user", content="Hello"),
-            ),
+            messages=(ConversationMessage(role="user", content="Hello"),),
             system_instruction="You are NexaMind.",
         )
 
@@ -103,3 +123,24 @@ class CountTokensServiceTests(SimpleTestCase):
 
         self.assertIs(context.exception, error)
         provider.close.assert_called_once_with()
+
+
+    @patch("apps.ai.services.GeminiProvider")
+    def test_uses_explicit_configuration(self, provider_class):
+        config = GeminiConfig(
+            api_key="test-api-key",
+            model="gemini-3.8-flash",
+            thinking_level="LOW",
+            max_output_tokens=8192,
+            timeout_ms=60000,
+        )
+
+        provider = provider_class.return_value
+        provider.count_tokens.return_value = self.result
+
+        result = count_tokens(self.request, config=config)
+
+        provider_class.assert_called_once_with(config=config)
+        provider.count_tokens.assert_called_once_with(self.request)
+        provider.close.assert_called_once_with()
+        self.assertEqual(result, self.result)
