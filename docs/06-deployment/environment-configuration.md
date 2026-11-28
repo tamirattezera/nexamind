@@ -111,58 +111,48 @@ Application behavior should depend on explicitly defined configuration, not assu
 
 The Django backend owns the sensitive application configuration.
 
-Expected configuration categories include:
+The current backend configuration is implemented in
+`backend/config/settings.py`.
 
-| Category            | Example                            |
-| ------------------- | ---------------------------------- |
-| Django security     | `SECRET_KEY`, `DEBUG`              |
-| Host configuration  | `ALLOWED_HOSTS`                    |
-| Database            | `DATABASE_URL`                     |
-| AI provider         | `GEMINI_API_KEY`, `GEMINI_MODEL`   |
-| Cross-origin access | `CORS_ALLOWED_ORIGINS`             |
-| Authentication      | JWT lifetime and related settings  |
-| Logging             | Log level and output configuration |
+| Category | Implemented configuration |
+| -------- | ------------------------- |
+| Django security | `DJANGO_SECRET_KEY`, `DJANGO_DEBUG` |
+| Host configuration | `DJANGO_ALLOWED_HOSTS` |
+| Cross-origin access | `DJANGO_CORS_ALLOWED_ORIGINS` |
+| Database | `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT` |
+| Database connection timeout | `DB_CONNECT_TIMEOUT` |
+| Readiness SQL timeout | `HEALTH_CHECK_DB_STATEMENT_TIMEOUT_MS` |
+| Shared production cache | `REDIS_URL` |
+| Redis connection and socket timeouts | `REDIS_SOCKET_CONNECT_TIMEOUT`, `REDIS_SOCKET_TIMEOUT` |
+| AI provider | `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_THINKING_LEVEL`, `GEMINI_MAX_OUTPUT_TOKENS`, `GEMINI_TIMEOUT_MS` |
+| Conversation policy | `CHAT_CONTEXT_MAX_INPUT_TOKENS`, `CHAT_MAX_MESSAGE_LENGTH` |
+| Generation rate limiting | `CHAT_GENERATION_RATE_LIMIT`, `CHAT_GENERATION_RATE_WINDOW_SECONDS` |
+| Deployment security | `DJANGO_SECURE_SSL_REDIRECT`, `DJANGO_SESSION_COOKIE_SECURE`, `DJANGO_CSRF_COOKIE_SECURE`, `DJANGO_SECURE_HSTS_SECONDS` |
 
-The exact names and implementation must match the final backend code.
+This inventory describes the current implementation, not proposed settings.
 
 ### 4.1 Django Settings Structure
 
-The planned settings structure is:
+The current project uses a single Django settings module:
 
 ```text
 backend/
 └── config/
-    └── settings/
-        ├── __init__.py
-        ├── base.py
-        ├── development.py
-        └── production.py
+    └── settings.py
 ```
 
-Responsibilities:
+The settings module loads environment variables from the
+repository-root `.env` file using `django-environ`.
 
-**`base.py`**
+Cache selection depends on `DJANGO_DEBUG`:
 
-- Shared installed applications.
-- Shared middleware.
-- Common REST framework configuration.
-- Shared database configuration interface.
-- Common authentication settings.
+- `True`: process-local `LocMemCache` for development and tests.
+- `False`: shared Redis cache configured by `REDIS_URL`.
+- Production cache checks verify Redis access. Production must not
+  silently fall back to process-local memory.
 
-**`development.py`**
-
-- Development-specific overrides.
-- Local development behavior.
-- Debugging configuration.
-
-**`production.py`**
-
-- Production security settings.
-- Production logging.
-- Secure host and origin configuration.
-- Production-specific behavior.
-
-Testing configuration should be selected explicitly when required.
+The project captures the original deployment mode in `IS_PRODUCTION`
+because Django's test runner can change `DEBUG` during test execution.
 
 ### 4.2 Configuration Validation
 
@@ -170,7 +160,7 @@ Required configuration must be validated during application startup.
 
 Examples:
 
-- Missing production `SECRET_KEY` must prevent startup.
+- Missing production `DJANGO_SECRET_KEY` must prevent startup.
 - Missing production database configuration must be reported clearly.
 - Missing Gemini credentials must produce an appropriate configuration error when AI functionality is initialized or requested.
 - Invalid production host configuration must not silently fall back to permissive settings.
@@ -217,18 +207,37 @@ The following inventory defines the expected configuration categories.
 
 ### 6.1 Backend Variables
 
-| Variable               | Required              | Sensitive | Purpose                      |
-| ---------------------- | --------------------- | --------- | ---------------------------- |
-| `DJANGO_SECRET_KEY`    | Yes                   | Yes       | Django cryptographic signing |
-| `DJANGO_DEBUG`         | Yes                   | No        | Debugging mode               |
-| `DJANGO_ALLOWED_HOSTS` | Yes                   | No        | Accepted hostnames           |
-| `DATABASE_URL`         | Yes                   | Yes       | PostgreSQL connection        |
-| `GEMINI_API_KEY`       | For AI generation     | Yes       | Gemini authentication        |
-| `GEMINI_MODEL`         | Yes for AI generation | No        | Selected model identifier    |
-| `CORS_ALLOWED_ORIGINS` | Yes                   | No        | Allowed browser origins      |
-| `LOG_LEVEL`            | Yes                   | No        | Application logging level    |
+| Variable | Required | Sensitive | Purpose |
+| -------- | -------- | --------- | ------- |
+| `DJANGO_SECRET_KEY` | Yes | Yes | Django cryptographic signing |
+| `DJANGO_DEBUG` | Has a default; set explicitly | No | Development or production mode |
+| `DJANGO_ALLOWED_HOSTS` | Configure for deployment | No | Accepted hostnames |
+| `DJANGO_CORS_ALLOWED_ORIGINS` | Configure when frontend origin is known | No | Comma-separated allowed browser origins |
+| `DB_NAME` | Yes | No | PostgreSQL database name |
+| `DB_USER` | Yes | Depends on deployment | PostgreSQL username |
+| `DB_PASSWORD` | Yes | Yes | PostgreSQL password |
+| `DB_HOST` | Yes | No | PostgreSQL hostname |
+| `DB_PORT` | Yes | No | PostgreSQL port |
+| `DB_CONNECT_TIMEOUT` | Has a default | No | PostgreSQL connection-establishment timeout in seconds; affects application database connections |
+| `HEALTH_CHECK_DB_STATEMENT_TIMEOUT_MS` | Has a default | No | Maximum duration of each readiness-check SQL statement in milliseconds; must be greater than zero |
+| `REDIS_URL` | Production only | Yes if credentials are embedded | Shared Redis cache connection |
+| `REDIS_SOCKET_CONNECT_TIMEOUT` | Has a default in production | No | Redis connection-establishment timeout in seconds |
+| `REDIS_SOCKET_TIMEOUT` | Has a default in production | No | Redis socket-operation timeout in seconds |
+| `GEMINI_API_KEY` | Required for AI generation | Yes | Gemini authentication |
+| `GEMINI_MODEL` | Has a default | No | Default Gemini model |
+| `GEMINI_THINKING_LEVEL` | Has a default | No | Default thinking level |
+| `GEMINI_MAX_OUTPUT_TOKENS` | Has a default | No | Default output-token limit |
+| `GEMINI_TIMEOUT_MS` | Has a default | No | Provider request timeout |
+| `CHAT_CONTEXT_MAX_INPUT_TOKENS` | Has a default | No | Context input-token limit |
+| `CHAT_MAX_MESSAGE_LENGTH` | Has a default | No | Maximum user-message length |
+| `CHAT_GENERATION_RATE_LIMIT` | Has a default | No | Generation submissions per window |
+| `CHAT_GENERATION_RATE_WINDOW_SECONDS` | Has a default | No | Generation rate-limit window |
+| `DJANGO_SECURE_SSL_REDIRECT` | Has a default | No | HTTPS redirect behavior |
+| `DJANGO_SESSION_COOKIE_SECURE` | Has a default | No | Secure session-cookie setting |
+| `DJANGO_CSRF_COOKIE_SECURE` | Has a default | No | Secure CSRF-cookie setting |
+| `DJANGO_SECURE_HSTS_SECONDS` | Has a default | No | HSTS duration |
 
-The names above are proposed configuration names. They must be aligned with the actual implementation.
+These names and defaults reflect the current `backend/config/settings.py`.
 
 ### 6.2 Frontend Variables
 
@@ -242,14 +251,19 @@ Avoid introducing frontend environment variables without a real requirement.
 
 ### 7.1 Development Files
 
-Example backend development configuration:
+The current backend environment files are located at the repository root:
 
 ```text
-backend/
+nexamind/
 ├── .env
 ├── .env.example
-└── config/
+└── backend/
+    └── config/
+        └── settings.py
 ```
+
+Django loads the repository-root `.env` through `django-environ`.
+The real `.env` file must remain excluded from version control.
 
 Example frontend development configuration:
 
@@ -260,29 +274,45 @@ frontend/
 └── src/
 ```
 
-Actual environment-file loading must be implemented deliberately using the selected configuration library or platform mechanism.
-
-Do not assume Django automatically reads `.env` files.
+The current backend explicitly loads the repository-root `.env` file
+with `django-environ`. Production deployments should supply configuration
+through the hosting platform's protected environment-variable mechanism.
 
 ### 7.2 Example Environment Files
 
 The repository should contain example files that document required variable names and safe placeholder values.
 
-Example backend `.env.example`:
+Example backend `.env.example` (repository root):
 
 ```env
-DJANGO_SECRET_KEY=replace-with-local-development-secret
+DJANGO_SECRET_KEY=replace-with-a-secure-secret
 DJANGO_DEBUG=True
 DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
-
-DATABASE_URL=postgresql://USER:PASSWORD@localhost:5432/nexamind_dev
-
-GEMINI_API_KEY=replace-with-your-development-api-key
-GEMINI_MODEL=replace-with-verified-model-id
-
-CORS_ALLOWED_ORIGINS=http://localhost:5173
-LOG_LEVEL=DEBUG
+DJANGO_CORS_ALLOWED_ORIGINS=http://localhost:5173
+DJANGO_SECURE_SSL_REDIRECT=False
+DJANGO_SESSION_COOKIE_SECURE=False
+DJANGO_CSRF_COOKIE_SECURE=False
+DJANGO_SECURE_HSTS_SECONDS=0
+DB_NAME=nexamind_db
+DB_USER=nexamind_user
+DB_PASSWORD=replace-with-your-database-password
+DB_HOST=127.0.0.1
+DB_PORT=5432
+REDIS_URL=redis://127.0.0.1:6379/1
+GEMINI_API_KEY=replace-with-your-api-key
+GEMINI_MODEL=gemini-3.8-flash
+GEMINI_THINKING_LEVEL=LOW
+GEMINI_MAX_OUTPUT_TOKENS=8192
+GEMINI_TIMEOUT_MS=60000
+CHAT_CONTEXT_MAX_INPUT_TOKENS=32768
+CHAT_MAX_MESSAGE_LENGTH=10000
+CHAT_GENERATION_RATE_LIMIT=10
+CHAT_GENERATION_RATE_WINDOW_SECONDS=60
 ```
+
+When `DJANGO_DEBUG=False`, the backend requires a shared Redis cache.
+Configure `REDIS_URL` with the production Redis connection supplied by
+the hosting platform. Do not use the local development Redis URL in production.
 
 Example frontend `.env.example`:
 
@@ -300,7 +330,7 @@ A secret is sensitive information that grants access to a protected resource or 
 
 Examples:
 
-- Django `SECRET_KEY`.
+- `DJANGO_SECRET_KEY` environment variable (Django's secret key).
 - Gemini API key.
 - PostgreSQL password.
 - JWT signing secret, if separately configured.
@@ -444,7 +474,7 @@ The backend should be able to change its selected model without requiring privat
 | Frontend cannot reach API       | Incorrect API URL                   | Verify `VITE_API_BASE_URL`         |
 | Browser blocks requests         | Incorrect CORS configuration        | Inspect allowed origins            |
 | Debug mode unexpectedly enabled | Incorrect Boolean parsing           | Review configuration parser        |
-| Production host rejected        | Missing allowed hostname            | Review `ALLOWED_HOSTS`             |
+| Production host rejected        | Missing allowed hostname            | Review `DJANGO_ALLOWED_HOSTS`             |
 
 Never solve configuration problems by exposing secrets in logs or error responses.
 

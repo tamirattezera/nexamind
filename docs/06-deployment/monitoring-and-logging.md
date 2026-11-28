@@ -229,42 +229,49 @@ A request ID should be generated or validated by trusted backend infrastructure.
 
 ## 6. Backend Health Monitoring
 
-NexaMind should provide a health endpoint.
-
-Example:
-
-```http
-GET /api/v1/health/
-```
-
-Expected response:
-
-```json
-{
-  "status": "ok"
-}
-```
-
-A health endpoint should reveal whether the application process is responding.
+NexaMind exposes separate liveness and readiness endpoints.
 
 ### 6.1 Liveness
 
-Liveness indicates whether the application process is running and able to respond.
+GET /api/v1/health/live/
 
-It should be lightweight and should not depend on every external service being available.
+Liveness checks whether the Django process can respond.
+It does not check PostgreSQL, Redis, or Gemini.
+
+A successful response is HTTP 200:
+
+    {"status": "ok"}
 
 ### 6.2 Readiness
 
-Readiness indicates whether the application is ready to accept relevant work.
+GET /api/v1/health/
 
-Depending on deployment requirements, readiness checks may include:
+Readiness verifies PostgreSQL connectivity using SELECT 1 and
+the configured Django cache (Redis when DJANGO_DEBUG=False).
 
-- Database connectivity.
-- Required configuration.
-- Critical application initialization.
+A successful response is HTTP 200:
 
-Avoid making the health endpoint unnecessarily dependent on a live Gemini API request. External provider availability should be monitored separately.
+    {"status": "ok"}
 
+If either dependency check fails, the endpoint returns HTTP 503:
+
+    {"status": "unavailable"}
+
+Responses do not expose exception details, credentials, hostnames,
+or internal infrastructure information.
+
+DB_CONNECT_TIMEOUT configures PostgreSQL connection establishment.
+HEALTH_CHECK_DB_STATEMENT_TIMEOUT_MS bounds the readiness query
+using a transaction-local timeout.
+
+REDIS_SOCKET_CONNECT_TIMEOUT and REDIS_SOCKET_TIMEOUT configure
+production Redis connection and socket timeouts.
+
+Both endpoints accept GET requests only. Other methods receive
+HTTP 405.
+
+Gemini is excluded from readiness checks. Monitor provider availability
+and generation failures separately.
 ## 7. Database Monitoring
 
 PostgreSQL is responsible for persistent conversation and message storage.

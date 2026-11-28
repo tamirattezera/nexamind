@@ -191,31 +191,41 @@ Production Django settings must be explicitly configured.
 
 Important settings include:
 
-| Setting              | Production requirement         |
-| -------------------- | ------------------------------ |
-| `DEBUG`              | `False`                        |
-| `SECRET_KEY`         | Secure environment variable    |
-| `ALLOWED_HOSTS`      | Explicit production hostnames  |
-| `DATABASE_URL`       | Production database connection |
-| CORS origins         | Explicit frontend origin       |
-| CSRF trusted origins | Configured when required       |
-| Gemini API key       | Backend secret                 |
-| HTTPS                | Enabled                        |
-| Logging              | Production configuration       |
+| Environment variable                                                                     | Production requirement                                                                                        |
+| ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `DJANGO_DEBUG`                                                                           | `False`                                                                                                       |
+| `DJANGO_SECRET_KEY`                                                                      | Strong, private secret                                                                                        |
+| `DJANGO_ALLOWED_HOSTS`                                                                   | Explicit production hostnames                                                                                 |
+| `DJANGO_CORS_ALLOWED_ORIGINS`                                                            | Configure when the frontend origin is known                                                                   |
+| `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`                                | Production PostgreSQL connection                                                                              |
+| `DB_CONNECT_TIMEOUT`                                                                     | PostgreSQL connection-establishment timeout in seconds; affects application database connections (default: 2) |
+| `HEALTH_CHECK_DB_STATEMENT_TIMEOUT_MS`                                                   | Maximum duration of each readiness-check SQL statement in milliseconds (default: 2000)                        |
+| `REDIS_URL`                                                                              | Shared production Redis connection; required when `DJANGO_DEBUG=False`                                        |
+| `REDIS_SOCKET_CONNECT_TIMEOUT`                                                           | Production Redis connection-establishment timeout in seconds (default: 2)                                     |
+| `REDIS_SOCKET_TIMEOUT`                                                                   | Production Redis socket-operation timeout in seconds (default: 2)                                             |
+| `DJANGO_SECURE_SSL_REDIRECT`                                                             | Enable when HTTPS is configured                                                                               |
+| `DJANGO_SESSION_COOKIE_SECURE`                                                           | Enable for HTTPS production                                                                                   |
+| `DJANGO_CSRF_COOKIE_SECURE`                                                              | Enable for HTTPS production                                                                                   |
+| `DJANGO_SECURE_HSTS_SECONDS`                                                             | Configure after HTTPS verification                                                                            |
+| `GEMINI_API_KEY`                                                                         | Backend secret                                                                                                |
+| `GEMINI_MODEL`, `GEMINI_THINKING_LEVEL`, `GEMINI_MAX_OUTPUT_TOKENS`, `GEMINI_TIMEOUT_MS` | Verified provider configuration                                                                               |
+| `CHAT_CONTEXT_MAX_INPUT_TOKENS`, `CHAT_MAX_MESSAGE_LENGTH`                               | Application limits                                                                                            |
+| `CHAT_GENERATION_RATE_LIMIT`, `CHAT_GENERATION_RATE_WINDOW_SECONDS`                      | Generation rate-limit configuration                                                                           |
 
 Do not copy development settings blindly into production.
 
 ### 5.3 Dependencies
 
-Install production dependencies using the project's established dependency-management approach.
-
-Example:
+The current project uses `backend/requirements/base.txt` as its
+runtime dependency manifest. Install these dependencies from the
+`backend/` directory:
 
 ```bash
-pip install -r requirements/production.txt
+python -m pip install -r requirements/base.txt
 ```
 
-The exact dependency installation command must match the final backend structure.
+A separate production-specific requirements file has not yet been
+established.
 
 ### 5.4 Static Files
 
@@ -235,27 +245,25 @@ Do not assume that deploying new backend code automatically updates the database
 
 Review migration files and verify backup and rollback options before applying potentially destructive changes.
 
-### 5.6 Backend Health Check
+### 5.6 Backend Health Checks
 
-The backend should expose a health endpoint.
+The backend exposes separate liveness and readiness endpoints.
 
-Example:
+**Liveness**
 
-```http
-GET /api/v1/health/
-```
+`GET /api/v1/health/live/`
 
-Expected response:
+Checks whether the Django process can respond. It does not check external dependencies.
 
-```json
-{
-  "status": "ok"
-}
-```
+**Readiness**
 
-The endpoint should report application health without exposing secrets, database credentials, or internal infrastructure details.
+`GET /api/v1/health/`
 
-A basic health response does not necessarily prove that Gemini generation is operational. External provider availability should be monitored separately.
+Checks PostgreSQL connectivity and the configured Django cache.
+
+Both endpoints return HTTP 200 with `{"status": "ok"}` when healthy. Readiness returns HTTP 503 with `{"status": "unavailable"}` when PostgreSQL or the cache is unavailable.
+
+Health responses must not expose secrets or internal infrastructure details. Gemini availability is monitored separately and is not part of readiness.
 
 ## 6. PostgreSQL Deployment
 
@@ -274,15 +282,20 @@ Neon PostgreSQL is the initial candidate.
 
 ### 6.2 Connection Configuration
 
-The backend should receive its database connection information through a protected environment variable.
+The backend receives its database connection through separate environment variables.
 
 Example:
 
 ```env
-DATABASE_URL=postgresql://USER:PASSWORD@HOST:PORT/DATABASE
+DB_NAME=nexamind_db
+DB_USER=nexamind_user
+DB_PASSWORD=replace-with-your-database-password
+DB_HOST=your-postgresql-host
+DB_PORT=5432
 ```
 
-This is an illustrative format. Use the connection string supplied by the selected database provider.
+These are the database variables currently consumed by Django.
+Use the connection details supplied by the selected PostgreSQL provider.
 
 Never commit a real database connection string.
 
@@ -339,42 +352,68 @@ Do not assume a development API key will remain appropriate for production use.
 
 ## 8. CORS and Cross-Origin Configuration
 
-Because the frontend and backend may use different domains, cross-origin requests must be configured correctly.
+The backend implements cross-origin access using `django-cors-headers`.
+The `DJANGO_CORS_ALLOWED_ORIGINS` environment variable defines an explicit,
+comma-separated allowlist of browser origins.
 
-The backend should allow only the intended frontend origins.
+The planned React + Vite development origin is:
 
-Example conceptual configuration:
+`http://localhost:5173`
 
-```text
-Development:
-http://localhost:5173
+The NexaMind frontend has not yet been deployed. No production frontend
+origin has been selected or configured. Configure the actual origin after
+frontend deployment.
 
-Production:
-https://your-frontend-domain.example
-```
+Multiple origins are supported. An empty or unset allowlist permits no
+cross-origin browser origins. Wildcard origins are not used.
 
-These are examples, not actual NexaMind deployment domains.
+The API uses JWT bearer authentication through the `Authorization` header.
+Credentialed CORS is disabled. Allowed request headers include
+`Authorization`, `Content-Type`, and `Idempotency-Key`.
 
-Avoid unrestricted wildcard CORS policies for authenticated production APIs.
-
-CORS is a browser access-control mechanism; it is not a substitute for authentication or authorization.
+`DJANGO_ALLOWED_HOSTS` validates request hostnames;
+`DJANGO_CORS_ALLOWED_ORIGINS` controls permitted browser origins.
+CORS does not replace authentication or authorization.
 
 ## 9. Production Environment Variables
 
 The following table describes expected configuration categories.
 
-| Variable               | Component | Secret? |
-| ---------------------- | --------- | ------- |
-| `DEBUG`                | Backend   | No      |
-| `SECRET_KEY`           | Backend   | Yes     |
-| `DATABASE_URL`         | Backend   | Yes     |
-| `GEMINI_API_KEY`       | Backend   | Yes     |
-| `GEMINI_MODEL`         | Backend   | No      |
-| `ALLOWED_HOSTS`        | Backend   | No      |
-| `CORS_ALLOWED_ORIGINS` | Backend   | No      |
-| `VITE_API_BASE_URL`    | Frontend  | No      |
+| Variable                              | Component | Secret? |
+| ------------------------------------- | --------- | ------- |
+| `DJANGO_SECRET_KEY`                   | Backend   | Yes     |
+| `DJANGO_DEBUG`                        | Backend   | No      |
+| `DJANGO_ALLOWED_HOSTS`                | Backend   | No      |
+| `DJANGO_CORS_ALLOWED_ORIGINS`         | Backend   | No      |
+| `DJANGO_SECURE_SSL_REDIRECT`          | Backend   | No      |
+| `DJANGO_SESSION_COOKIE_SECURE`        | Backend   | No      |
+| `DJANGO_CSRF_COOKIE_SECURE`           | Backend   | No      |
+| `DJANGO_SECURE_HSTS_SECONDS`          | Backend   | No      |
+| `DB_NAME`                             | Backend   | No      |
+| `DB_USER`                             | Backend   | No      |
+| `DB_PASSWORD`                         | Backend   | Yes     |
+| `DB_HOST`                             | Backend   | No      |
+| `DB_PORT`                             | Backend   | No      |
+| `DB_CONNECT_TIMEOUT`                  | Backend   | No      |
+| `HEALTH_CHECK_DB_STATEMENT_TIMEOUT_MS` | Backend   | No      |
+| `REDIS_URL`                           | Backend   | Yes     |
+| `REDIS_SOCKET_CONNECT_TIMEOUT`        | Backend   | No      |
+| `REDIS_SOCKET_TIMEOUT`                | Backend   | No      |
+| `GEMINI_API_KEY`                      | Backend   | Yes     |
+| `GEMINI_MODEL`                        | Backend   | No      |
+| `GEMINI_THINKING_LEVEL`               | Backend   | No      |
+| `GEMINI_MAX_OUTPUT_TOKENS`            | Backend   | No      |
+| `GEMINI_TIMEOUT_MS`                   | Backend   | No      |
+| `CHAT_CONTEXT_MAX_INPUT_TOKENS`       | Backend   | No      |
+| `CHAT_MAX_MESSAGE_LENGTH`             | Backend   | No      |
+| `CHAT_GENERATION_RATE_LIMIT`          | Backend   | No      |
+| `CHAT_GENERATION_RATE_WINDOW_SECONDS` | Backend   | No      |
+| `VITE_API_BASE_URL`                   | Frontend  | No      |
 
-The final variable names must match the actual implementation.
+The backend variable names match the current Django configuration
+and repository-root `.env.example`. `REDIS_URL` must point to a
+shared Redis service in production. `VITE_API_BASE_URL` is public
+frontend configuration and must never contain private credentials.
 
 Production secrets must be configured through the hosting platform's protected environment-variable or secret-management interface.
 
