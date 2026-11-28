@@ -14,6 +14,9 @@ from datetime import timedelta
 from pathlib import Path
 import environ
 
+from corsheaders.defaults import default_headers
+from django.core.exceptions import ImproperlyConfigured
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 env = environ.Env()
@@ -29,7 +32,69 @@ SECRET_KEY = env("DJANGO_SECRET_KEY")
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = env.bool("DJANGO_DEBUG", default=False)
 
+# Capture the deployment environment before Django test setup changes DEBUG.
+IS_PRODUCTION = not DEBUG
+
+
+# Cache configuration
+# Development uses process-local memory.
+# Production requires a shared Redis cache.
+if DEBUG:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "nexamind-development-cache",
+        }
+    }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": env("REDIS_URL"),
+            "KEY_PREFIX": "nexamind",
+            "OPTIONS": {
+                "socket_connect_timeout": env.float(
+                    "REDIS_SOCKET_CONNECT_TIMEOUT",
+                    default=2.0,
+                ),
+                "socket_timeout": env.float(
+                    "REDIS_SOCKET_TIMEOUT",
+                    default=2.0,
+                ),
+            },
+        }
+    }
+
+
 ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=[])
+
+# Browser origins permitted to access the API.
+CORS_ALLOWED_ORIGINS = env.list(
+    "DJANGO_CORS_ALLOWED_ORIGINS",
+    default=[],
+)
+CORS_ALLOW_CREDENTIALS = False
+CORS_ALLOW_HEADERS = (*default_headers, "idempotency-key")
+# Deployment security
+SECURE_SSL_REDIRECT = env.bool(
+    "DJANGO_SECURE_SSL_REDIRECT",
+    default=False,
+)
+
+SESSION_COOKIE_SECURE = env.bool(
+    "DJANGO_SESSION_COOKIE_SECURE",
+    default=False,
+)
+
+CSRF_COOKIE_SECURE = env.bool(
+    "DJANGO_CSRF_COOKIE_SECURE",
+    default=False,
+)
+
+SECURE_HSTS_SECONDS = env.int(
+    "DJANGO_SECURE_HSTS_SECONDS",
+    default=0,
+)
 
 # Gemini AI configuration
 GEMINI_API_KEY = env("GEMINI_API_KEY", default="")
@@ -52,11 +117,25 @@ CHAT_CONTEXT_MAX_INPUT_TOKENS = env.int(
     "CHAT_CONTEXT_MAX_INPUT_TOKENS",
     default=32768,
 )
+CHAT_MAX_MESSAGE_LENGTH = env.int(
+    "CHAT_MAX_MESSAGE_LENGTH",
+    default=10000,
+)
+
+CHAT_GENERATION_RATE_LIMIT = env.int(
+    "CHAT_GENERATION_RATE_LIMIT",
+    default=10,
+)
+CHAT_GENERATION_RATE_WINDOW_SECONDS = env.int(
+    "CHAT_GENERATION_RATE_WINDOW_SECONDS",
+    default=60,
+)
 
 
 # Application definition
 
 INSTALLED_APPS = [
+    "corsheaders",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -75,6 +154,7 @@ AUTH_USER_MODEL = "accounts.User"
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -102,6 +182,17 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 
 
+HEALTH_CHECK_DB_STATEMENT_TIMEOUT_MS = env.int(
+    "HEALTH_CHECK_DB_STATEMENT_TIMEOUT_MS",
+    default=2000,
+)
+
+if HEALTH_CHECK_DB_STATEMENT_TIMEOUT_MS <= 0:
+    raise ImproperlyConfigured(
+        "HEALTH_CHECK_DB_STATEMENT_TIMEOUT_MS must be greater than zero."
+    )
+
+
 # Database
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
 
@@ -113,6 +204,9 @@ DATABASES = {
         "PASSWORD": env("DB_PASSWORD"),
         "HOST": env("DB_HOST"),
         "PORT": env("DB_PORT"),
+        "OPTIONS": {
+            "connect_timeout": env.int("DB_CONNECT_TIMEOUT", default=2),
+        },
     }
 }
 
