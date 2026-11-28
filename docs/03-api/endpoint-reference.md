@@ -164,14 +164,26 @@ Expected response:
 
 Possible errors:
 
-- `400` — Invalid request data.
-- `401` — Invalid credentials.
+- `400` — Invalid request data. Malformed requests are rejected before credential authentication and do not count toward login throttling.
+- `401` — Invalid credentials. The response does not distinguish an unknown email from an incorrect password.
+- `429` — Login cooldown is active. The response includes a `Retry-After` header containing the remaining cooldown in seconds.
+- `503` — Login protection is unavailable because its cache backend cannot be accessed. Authentication fails closed.
+
+Login protection policy:
+
+- Failed credential attempts are counted per normalized email and client IP address.
+- The limit is five failed attempts within a 15-minute window.
+- The first four failed attempts return `401`. The fifth activates a 15-minute cooldown and returns `429`.
+- Further attempts during the cooldown are rejected with `429`, including attempts with correct credentials.
+- A successful login clears the corresponding failure counter and cooldown.
+- There is no permanent account lockout.
+- The current client IP source is `REMOTE_ADDR`. Forwarded IP headers are not trusted until the deployment proxy trust contract is configured.
 
 Security requirements:
 
 - Do not reveal whether the email or password was incorrect.
-- Apply suitable login throttling.
 - Do not log credentials or tokens.
+- Login throttling uses the shared production Redis cache. If login protection cannot access its cache, fail closed with `503`.
 - Final token storage and transport strategy must be documented before frontend authentication is implemented.
 
 ### 3.3 Refresh Access Token
@@ -205,8 +217,8 @@ The submitted refresh token is blacklisted after successful rotation.
 
 Possible errors:
 
-- `400` — Missing or malformed refresh token.
-- `401` — Invalid, expired, or blacklisted refresh token.
+- `400` — Request validation failed; field-keyed serializer errors identify missing or malformed input.
+- `401` — Invalid, expired, or blacklisted refresh token; returned as a `detail` error.
 
 ### 3.4 Verify Token
 
@@ -236,8 +248,8 @@ A successful response confirms that the token passes these checks. This endpoint
 
 Possible errors:
 
-- `400` — Missing token or invalid request data.
-- `401` — Invalid, expired, or blacklisted token.
+- `400` — Request validation failed; field-keyed serializer errors identify missing or malformed input.
+- `401` — Invalid, expired, or blacklisted token; returned as a `detail` error.
 
 ### 3.5 Current User
 
@@ -594,10 +606,12 @@ All errors use the shared API error structure:
 | `401`       | `AUTHENTICATION_REQUIRED`     | Authentication is required.                                         |
 | `404`       | `RESOURCE_NOT_FOUND`          | The conversation does not exist or is not accessible to the user.   |
 | `409`       | `IDEMPOTENCY_KEY_REUSED`      | The same key was previously used with different normalized content. |
+| `409`       | `CHAT_TURN_ALREADY_IN_PROGRESS` | A different submission arrives while another turn is in progress in the conversation. |
 | `429`       | `RATE_LIMIT_EXCEEDED`         | The application rate limit was reached.                             |
 | `502`       | `AI_PROVIDER_ERROR`           | The AI provider returned a failure or unusable response.            |
 | `503`       | `CHAT_CONTEXT_UNAVAILABLE`    | Required conversation context could not be obtained.                |
 | `504`       | `AI_PROVIDER_TIMEOUT`         | The AI provider request timed out.                                  |
+| `504`       | `CHAT_TURN_PROCESSING_TIMEOUT` | A ChatTurn exceeded the stale-processing threshold and was recovered. |
 | `500`       | `INTERNAL_SERVER_ERROR`       | An unexpected internal failure occurred.                            |
 
 **Idempotency and failure semantics:**
@@ -605,7 +619,7 @@ All errors use the shared API error structure:
 1. Every new generation submission requires a valid UUID v4 `Idempotency-Key`.
 2. A completed submission replayed with the same key and identical normalized content returns the original successful response with `200 OK`.
 3. An in-progress submission replayed with the same key and identical content returns `202 Accepted`; it does not create another Message or ChatTurn.
-4. Reusing a key with different normalized content returns `409 Conflict` with `IDEMPOTENCY_KEY_REUSED`.
+4. Reusing a key with different normalized content returns `409 Conflict` with `IDEMPOTENCY_KEY_REUSED`. A distinct new submission while another turn is `IN_PROGRESS` in the same conversation returns `409 Conflict` with `CHAT_TURN_ALREADY_IN_PROGRESS`. These are separate conflict conditions.
 5. Preflight failures occur before Transaction A. They return an API error without creating a user Message or ChatTurn and without reserving the idempotency key. A subsequent valid submission may use that key.
 6. Preflight context failures map as follows:
    - `CHAT_CONTEXT_LIMIT_EXCEEDED` → `400 Bad Request`.

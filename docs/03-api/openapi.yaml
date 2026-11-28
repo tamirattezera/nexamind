@@ -74,9 +74,35 @@ paths:
               schema:
                 $ref: "#/components/schemas/TokenResponse"
         "400":
-          $ref: "#/components/responses/ValidationError"
+          description: Request validation failed. Field-keyed validation errors are returned. Malformed requests do not count toward login throttling.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginValidationError"
         "401":
-          description: Invalid credentials
+          description: Invalid credentials. Unknown email and incorrect password produce the same response.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DRFDetailError"
+        "429":
+          description: Login cooldown is active after five failed credential attempts within the 15-minute failure window.
+          headers:
+            Retry-After:
+              description: Remaining cooldown duration in seconds.
+              schema:
+                type: integer
+                minimum: 1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DRFDetailError"
+        "503":
+          description: Login protection cache is unavailable. Authentication fails closed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DRFDetailError"
 
   /auth/token/refresh/:
     post:
@@ -99,9 +125,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/TokenResponse"
         "400":
-          $ref: "#/components/responses/ValidationError"
+          description: Request validation failed. Field-keyed serializer errors are returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginValidationError"
         "401":
-          description: Invalid or expired refresh token
+          description: Invalid, expired, or blacklisted refresh token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DRFDetailError"
 
   /auth/token/verify/:
     post:
@@ -130,9 +164,17 @@ paths:
                 maxProperties: 0
                 additionalProperties: false
         "400":
-          $ref: "#/components/responses/ValidationError"
+          description: Request validation failed. Field-keyed serializer errors are returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginValidationError"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          description: Invalid, expired, or blacklisted token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DRFDetailError"
 
   /auth/me/:
     get:
@@ -340,7 +382,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          description: Idempotency key reused with different normalized content
+          description: Conflict caused by either an idempotency key reused with different normalized content (IDEMPOTENCY_KEY_REUSED) or a distinct submission while another turn is in progress in the conversation (CHAT_TURN_ALREADY_IN_PROGRESS)
           content:
             application/json:
               schema:
@@ -364,7 +406,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "504":
-          description: AI provider request timed out
+          description: >-
+            AI_PROVIDER_TIMEOUT indicates the AI provider request timed out.
+            CHAT_TURN_PROCESSING_TIMEOUT indicates a ChatTurn exceeded
+            the stale-processing threshold and was recovered.
           content:
             application/json:
               schema:
@@ -534,24 +579,26 @@ components:
 
     ConversationCreate:
       type: object
-      additionalProperties: false
       properties:
         title:
           type: string
-          maxLength: 200
+          maxLength: 255
         custom_instructions:
-          type: string
+          type:
+            - string
+            - "null"
 
     ConversationUpdate:
       type: object
       minProperties: 1
-      additionalProperties: false
       properties:
         title:
           type: string
-          maxLength: 200
+          maxLength: 255
         custom_instructions:
-          type: string
+          type:
+            - string
+            - "null"
 
     Conversation:
       type: object
@@ -568,7 +615,9 @@ components:
         title:
           type: string
         custom_instructions:
-          type: string
+          type:
+            - string
+            - "null"
         created_at:
           type: string
           format: date-time
@@ -723,6 +772,22 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Message"
+
+    LoginValidationError:
+      type: object
+      description: Field names map to arrays of validation messages.
+      additionalProperties:
+        type: array
+        items:
+          type: string
+
+    DRFDetailError:
+      type: object
+      required:
+        - detail
+      properties:
+        detail:
+          type: string
 
     Error:
       type: object
