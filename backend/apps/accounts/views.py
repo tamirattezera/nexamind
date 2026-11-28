@@ -1,7 +1,13 @@
 from rest_framework.generics import CreateAPIView, RetrieveAPIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
 
-from .serializers import CurrentUserSerializer, RegistrationSerializer
+from rest_framework_simplejwt.views import TokenObtainPairView
+
+from .serializers import (
+    CurrentUserSerializer,
+    LoginSerializer,
+    RegistrationSerializer,
+)
 
 
 class RegistrationView(CreateAPIView):
@@ -19,3 +25,9 @@ class CurrentUserView(RetrieveAPIView):
 
     def get_object(self):
         return self.request.user
+
+
+class LoginView(TokenObtainPairView):
+    """JWT login endpoint with email/IP failure protection."""
+
+    serializer_class = LoginSerializer
