@@ -6,12 +6,13 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.core import signing
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, transaction
-from django.test import TestCase
+from django.db import IntegrityError, connection, transaction
+from django.test import TestCase, TransactionTestCase
+from django.test.utils import CaptureQueriesContext
 from rest_framework import status
 from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.request import Request
-from rest_framework.test import APIRequestFactory, APITestCase
+from rest_framework.test import APIClient, APIRequestFactory, APITestCase
 from django.utils import timezone
 
 from .models import ChatTurn, Conversation, Message
@@ -26,6 +27,12 @@ from .serializers import ConversationSerializer
 from .instructions.platform import (
     PLATFORM_INSTRUCTION_VERSION,
     PLATFORM_SYSTEM_INSTRUCTION,
+)
+from .models import (
+    ChatTurn,
+    Conversation,
+    GenerationSubmission,
+    Message,
 )
 
 User = get_user_model()
@@ -794,6 +801,16 @@ class ChatTurnModelTests(TestCase):
         self.assertEqual(turn.error_code, "PROVIDER_TIMEOUT")
         self.assertIsNone(turn.error_message)
 
+    def test_rejects_execution_claim_id_without_claimed_at(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                self.create_turn(execution_claim_id=uuid.uuid4())
+
+    def test_rejects_execution_claimed_at_without_claim_id(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                self.create_turn(execution_claimed_at=timezone.now())
+
     def test_rejects_invalid_request_hash(self):
         with self.assertRaises(IntegrityError):
             with transaction.atomic():
@@ -931,6 +948,54 @@ class ChatTurnModelTests(TestCase):
                     assistant_message=assistant_message,
                     completed_at=timezone.now(),
                 )
+
+
+class GenerationSubmissionModelTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="generation@example.com",
+            password="StrongTestPassword123!",
+        )
+
+    def test_generates_uuid_primary_key(self):
+        submission = GenerationSubmission.objects.create(
+            user=self.user,
+        )
+
+        self.assertIsInstance(submission.id, uuid.UUID)
+
+    def test_belongs_to_authenticated_user(self):
+        submission = GenerationSubmission.objects.create(
+            user=self.user,
+        )
+
+        self.assertEqual(submission.user, self.user)
+        self.assertEqual(submission.user_id, self.user.id)
+
+    def test_created_at_is_set_automatically(self):
+        submission = GenerationSubmission.objects.create(
+            user=self.user,
+        )
+
+        self.assertIsNotNone(submission.created_at)
+
+    def test_is_independent_of_conversations(self):
+        submission = GenerationSubmission.objects.create(
+            user=self.user,
+        )
+
+        conversation = Conversation.objects.create(
+            user=self.user,
+            title="Temporary conversation",
+        )
+
+        conversation.delete()
+
+        self.assertTrue(
+            GenerationSubmission.objects.filter(
+                id=submission.id,
+            ).exists()
+        )
 
 
 class MessageCursorCodecTests(TestCase):
@@ -1455,3 +1520,76 @@ class PlatformInstructionTests(TestCase):
             PLATFORM_SYSTEM_INSTRUCTION,
             PLATFORM_SYSTEM_INSTRUCTION.strip(),
         )
+
+
+class ConversationDetailLockingTests(TransactionTestCase):
+    """Verify conversation mutations acquire a PostgreSQL row lock."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="locking@example.com",
+            password="StrongTestPassword123!",
+        )
+        self.conversation = Conversation.objects.create(
+            user=self.user,
+            title="Conversation for locking tests",
+            custom_instructions="Be precise.",
+        )
+        self.url = f"/api/v1/conversations/{self.conversation.id}/"
+
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+
+    def get_conversation_lock_queries(self, captured_queries):
+        table_name = Conversation._meta.db_table.upper()
+
+        return [
+            query["sql"]
+            for query in captured_queries
+            if (
+                "FOR UPDATE" in query["sql"].upper()
+                and table_name in query["sql"].upper()
+            )
+        ]
+
+    def test_patch_acquires_conversation_row_lock(self):
+        with CaptureQueriesContext(connection) as captured:
+            response = self.client.patch(
+                self.url,
+                {"title": "Updated title"},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(self.get_conversation_lock_queries(captured))
+
+    def test_put_acquires_conversation_row_lock(self):
+        with CaptureQueriesContext(connection) as captured:
+            response = self.client.put(
+                self.url,
+                {
+                    "title": "Replaced title",
+                    "custom_instructions": "Use concise explanations.",
+                },
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(self.get_conversation_lock_queries(captured))
+
+    def test_delete_acquires_conversation_row_lock(self):
+        with CaptureQueriesContext(connection) as captured:
+            response = self.client.delete(self.url)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_204_NO_CONTENT,
+        )
+        self.assertTrue(self.get_conversation_lock_queries(captured))
+
+    def test_get_does_not_acquire_conversation_row_lock(self):
+        with CaptureQueriesContext(connection) as captured:
+            response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(self.get_conversation_lock_queries(captured))

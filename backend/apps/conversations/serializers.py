@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from .models import Conversation, Message
+from .message_config import get_conversation_message_config
 
 
 class ConversationSerializer(serializers.ModelSerializer):
@@ -24,7 +25,6 @@ class ConversationSerializer(serializers.ModelSerializer):
         ]
 
 
-
 class MessageSerializer(serializers.ModelSerializer):
     """Read-only serializer for conversation messages."""
 
@@ -37,3 +37,20 @@ class MessageSerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = fields
+
+
+class SendMessageSerializer(serializers.Serializer):
+    """Validate user-submitted conversation messages."""
+
+    content = serializers.CharField(trim_whitespace=True)
+
+    def validate_content(self, value):
+        config = get_conversation_message_config()
+
+        if len(value) > config.max_message_length:
+            raise serializers.ValidationError(
+                f"Ensure this field has no more than "
+                f"{config.max_message_length} characters."
+            )
+
+        return value

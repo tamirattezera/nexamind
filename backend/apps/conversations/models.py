@@ -188,10 +188,33 @@ class ChatTurn(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     started_at = models.DateTimeField(default=timezone.now)
+
+    execution_claim_id = models.UUIDField(
+        null=True,
+        blank=True,
+    )
+    execution_claimed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
     completed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        execution_claim_id__isnull=True,
+                        execution_claimed_at__isnull=True,
+                    )
+                    | models.Q(
+                        execution_claim_id__isnull=False,
+                        execution_claimed_at__isnull=False,
+                    )
+                ),
+                name="chatturn_execution_claim_pair_valid",
+            ),
             models.UniqueConstraint(
                 fields=["conversation", "idempotency_key"],
                 name="chatturn_conv_idem_uniq",
@@ -259,6 +282,10 @@ class ChatTurn(models.Model):
 
         indexes = [
             models.Index(
+                fields=["status", "execution_claimed_at"],
+                name="chatturn_status_claimed_idx",
+            ),
+            models.Index(
                 fields=["conversation", "created_at"],
                 name="chatturn_conv_created_idx",
             ),
@@ -270,3 +297,31 @@ class ChatTurn(models.Model):
 
     def __str__(self):
         return f"ChatTurn {self.id} ({self.status})"
+
+
+class GenerationSubmission(models.Model):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="generation_submissions",
+        db_index=False,
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["user", "created_at"],
+                name="gen_sub_user_created_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Generation submission by user {self.user_id}"
